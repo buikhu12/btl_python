@@ -12,7 +12,8 @@ class UserService:
         user=User(
             username=data.username,
             email=data.email,
-            password_hash=hash_password(data.password)
+            password_hash=hash_password(data.password),
+            role="USER"
         )
 
         return self.repository.create(user)
@@ -30,7 +31,7 @@ class UserService:
 
         user.username=data.username
         user.email=data.email
-        user.password_hash=data.password
+        user.password_hash=hash_password(data.password)
 
         return self.repository.update(user)
 
