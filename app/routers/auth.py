@@ -1,5 +1,5 @@
 from fastapi import APIRouter,Depends
-from sqlalchemy.orm import session
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.schemas.auth import LoginRequest,TokenRespone
@@ -11,6 +11,6 @@ router=APIRouter(
 )
 
 @router.post("/login",response_model=TokenRespone)
-def login(data:LoginRequest,db:session=Depends(get_db)):
+def login(data: LoginRequest, db: Session = Depends(get_db)):
     service=AuthService(db)
     return service.login(data)

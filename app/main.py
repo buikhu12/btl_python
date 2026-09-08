@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import Base,engine
 from app.models.user import User
+from app.models.category import Category
+from app.models.transaction import Transaction
 from app.routers import users, auth, transactions, categories, dashboard, ai
 
 
@@ -22,3 +24,5 @@ def home():
     return {"message": "Hello FastAPI"}
 app.include_router(users.router)
 app.include_router(auth.router)
+app.include_router(categories.router)
+app.include_router(transactions.router)
