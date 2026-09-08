@@ -10,12 +10,12 @@ class User(Base):
     email=Column(String(100),unique=True,nullable=False)
     password_hash=Column(String(255),nullable=False)
     role = Column(String(20),nullable=False,default="USER")
-    categories = relationship(
-    "Category",
-    back_populates="user"
-    )
+    # categories = relationship(
+    # "Category",
+    # back_populates="user"
+    # )
 
-    transactions = relationship(
-    "Transaction",
-    back_populates="user"
-    )
+    # transactions = relationship(
+    # "Transaction",
+    # back_populates="user"
+    # )

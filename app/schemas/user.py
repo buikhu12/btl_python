@@ -7,7 +7,6 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     username: str | None = None
     email: EmailStr | None = None
-    password: str | None = None
 
 class UserResponse(BaseModel):
     id:int
@@ -16,3 +15,6 @@ class UserResponse(BaseModel):
     role: str
     class Config:
         from_attribute=True
+
+class AdminResetPassword(BaseModel):
+    new_password: str
