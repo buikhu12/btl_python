@@ -13,5 +13,9 @@ class UserResponse(BaseModel):
     id:int
     username:str
     email:str
+    role: str
 
     model_config = ConfigDict(from_attributes=True)
+
+class AdminResetPassword(BaseModel):
+    new_password: str

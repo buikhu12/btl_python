@@ -15,7 +15,8 @@ class UserService:
         user=User(
             username=data.username,
             email=data.email,
-            password_hash=hash_password(data.password)
+            password_hash=hash_password(data.password),
+            role="USER"
         )
 
         return self.repository.create(user)

@@ -1,6 +1,6 @@
 from fastapi import APIRouter,Depends, Response, status
 from sqlalchemy.orm import Session
-
+from app.models.user import User
 from app.core.database import get_db
 from app.schemas.user import UserCreate,UserResponse,UserUpdate
 from app.services.user_service import UserService
@@ -19,8 +19,11 @@ def create_user(data:UserCreate #dữ liệu từ client hay fontend
     return service.create_user(data) #xử lý và trả về reponse
 
 @router.get("/me", response_model=UserResponse)
-def get_current_user_profile(current_user=Depends(get_current_user)):
+def get_me(
+    current_user: User = Depends(get_current_user)
+):
     return current_user
+
 
 @router.patch("/me", response_model=UserResponse)
 def update_current_user(data: UserUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_user)):

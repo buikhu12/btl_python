@@ -4,6 +4,7 @@ from jwt import ExpiredSignatureError, InvalidTokenError, decode
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.user import User
 from app.repositories.user_repository import UserRepository
 from app.security.jwt import ALGORITHM, SECRET_KEY
 
@@ -28,3 +29,16 @@ def get_current_user(
     if user is None:
         raise credentials_error
     return user
+
+def require_admin(
+    current_user: User = Depends(get_current_user)
+):
+
+    if current_user.role != "ADMIN":
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+    return current_user
