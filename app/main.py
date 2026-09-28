@@ -2,8 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import Base,engine
 from app.models.user import User
-from app.routers import users, auth, transactions, categories, dashboard, ai
-
+from app.routers import users, auth, transactions, categories, dashboard, ai, report
 
 app = FastAPI()
 
@@ -20,5 +19,11 @@ app.add_middleware(
 @app.get("/")
 def home():
     return {"message": "Hello FastAPI"}
+
 app.include_router(users.router)
 app.include_router(auth.router)
+app.include_router(transactions.router)
+app.include_router(categories.router)
+app.include_router(dashboard.router)
+app.include_router(ai.router)
+app.include_router(report.router)
