@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.user import User
 from app.schemas.user import UserResponse, UserUpdate,AdminResetPassword
-from app.security.jwt import require_admin
+from app.dependencies.auth import require_admin
 from app.security.password import hash_password
 
 
