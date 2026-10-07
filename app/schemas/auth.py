@@ -9,7 +9,7 @@ class LoginUser(BaseModel):
     username: str
     email: EmailStr
     role: str
-    
 class TokenRespone(BaseModel):
     access_token:str
     token_type:str
+    user: LoginUser

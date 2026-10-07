@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import Base,engine
 from app.models.user import User
 from app.routers import users, auth, transactions, categories, dashboard, ai, report
+from app.routers import users, auth, transactions, categories, dashboard, ai
+from app.routers.admin import router as admin_router
 
 app = FastAPI()
 
@@ -27,3 +29,4 @@ app.include_router(categories.router)
 app.include_router(dashboard.router)
 app.include_router(ai.router)
 app.include_router(report.router)
+app.include_router(admin_router)
