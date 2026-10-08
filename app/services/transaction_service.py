@@ -35,7 +35,19 @@ class TransactionService:
 
     def create_transaction(self, data: TransactionCreate, user_id: int):
         self._validate_category(data.category_id, data.type, user_id)
-        return self.repository.create(Transaction(user_id=user_id, **data.model_dump()))
+        from app.repositories.wallet_repository import WalletRepository
+        wallet = WalletRepository(self.repository.db).get_by_user_id(user_id)
+        if not wallet:
+            wallet = WalletRepository(self.repository.db).create_default_wallet(user_id=user_id)
+        
+        tx_data = data.model_dump()
+        tx = Transaction(user_id=user_id, wallet_id=wallet.id, **tx_data)
+        created = self.repository.create(tx)
+        
+        change = data.amount if data.type == "income" else -data.amount
+        wallet.balance += change
+        self.repository.db.commit()
+        return created
 
     def update_transaction(self, transaction_id: int, data: TransactionUpdate, user_id: int):
         transaction = self.get_transaction(transaction_id, user_id)
@@ -46,4 +58,10 @@ class TransactionService:
         return self.repository.save(transaction)
 
     def delete_transaction(self, transaction_id: int, user_id: int):
-        self.repository.delete(self.get_transaction(transaction_id, user_id))
+        tx = self.get_transaction(transaction_id, user_id)
+        from app.repositories.wallet_repository import WalletRepository
+        wallet = WalletRepository(self.repository.db).get_by_user_id(user_id)
+        if wallet:
+            change = tx.amount if tx.type == "expense" else -tx.amount
+            wallet.balance += change
+        self.repository.delete(tx)

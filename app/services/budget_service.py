@@ -28,15 +28,9 @@ class BudgetService:
 
         # 2. Kiểm tra nghiệp vụ trích logic: Hạn mức không nên vượt quá số dư hiện có trong ví
         wallet = self.wallet_repo.get_by_user_id(user_id)
+        if not wallet:
+            wallet = self.wallet_repo.create_default_wallet(user_id=user_id)
         current_wallet_balance = wallet.balance if wallet else Decimal("0.00")
-        if dto.amount_limit > current_wallet_balance:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Hạn mức ngân sách ({dto.amount_limit:,.0f} VND) không thể vượt quá "
-                    f"tổng số tiền hiện có trong ví ({current_wallet_balance:,.0f} VND)!"
-                )
-            )
 
         # 3. Tạo ngân sách mới
         created_budget = self.repo.create(dto, user_id)
@@ -73,9 +67,9 @@ class BudgetService:
             func.coalesce(func.sum(Transaction.amount), 0)
         ).filter(
             Transaction.user_id == user_id,
-            Transaction.type == "EXPENSE",
-            func.extract("month", Transaction.transaction_date) == month,
-            func.extract("year", Transaction.transaction_date) == year
+            func.lower(Transaction.type) == "expense",
+            func.extract("month", Transaction.occurred_at) == month,
+            func.extract("year", Transaction.occurred_at) == year
         ).scalar()
 
         total_spent = Decimal(str(total_spent_query))

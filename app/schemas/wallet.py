@@ -15,6 +15,7 @@ class WalletCreate(WalletBase):
 
 class WalletUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
+    balance: Optional[Decimal] = Field(None, ge=0, description="Cập nhật số dư ví")
 
 
 class WalletResponse(WalletBase):

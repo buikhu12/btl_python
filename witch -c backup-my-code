@@ -1,0 +1,17 @@
+ .env                                       |    2 [32m+[m[31m-[m
+ app/main.py                                |    7 [32m+[m[31m-[m
+ app/models/category.py                     |   12 [32m+[m
+ app/models/transaction.py                  |   16 [32m+[m[31m-[m
+ app/models/user.py                         |   35 [32m+[m[31m-[m
+ app/routers/dashboard.py                   |   47 [32m+[m
+ app/schemas/dashboard.py                   |   34 [32m+[m
+ app/services/dashboard_service.py          |   73 [32m+[m
+ frontend/package-lock.json                 | 2213 [32m+++++++++++++++++++++++++[m[31m---[m
+ frontend/package.json                      |    8 [32m+[m[31m-[m
+ frontend/src/App.css                       |  287 [32m++[m[31m--[m
+ frontend/src/App.jsx                       |   56 [32m+[m[31m-[m
+ frontend/src/components/ProtectedRoute.jsx |   16 [32m+[m[31m-[m
+ frontend/src/index.css                     |  113 [32m+[m[31m-[m
+ frontend/src/pages/Home.jsx                |   28 [31m-[m
+ frontend/src/pages/Login.jsx               |  255 [32m++[m[31m--[m
+ 16 files changed, 2599 insertions(+), 603 deletions(-)

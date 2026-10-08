@@ -28,8 +28,10 @@ class WalletService:
             )
         if dto.name is not None:
             wallet.name = dto.name
-            self.db.commit()
-            self.db.refresh(wallet)
+        if dto.balance is not None:
+            wallet.balance = dto.balance
+        self.db.commit()
+        self.db.refresh(wallet)
         return WalletResponse.model_validate(wallet)
 
     def adjust_balance(self, user_id: int, amount: Decimal, is_income: bool) -> WalletResponse:
