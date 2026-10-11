@@ -5,6 +5,8 @@ from app.models.budget import Budget
 from app.models.transaction import Transaction
 from app.models.savings_goal import SavingsGoal
 from app.models.savings_contribution import SavingsContribution
+from app.models.planned_expense import PlannedExpense
+
 
 __all__ = [
     "User",
@@ -14,4 +16,5 @@ __all__ = [
     "Transaction",
     "SavingsGoal",
     "SavingsContribution",
+    "PlannedExpense",
 ]

@@ -39,4 +39,9 @@ class User(Base):
     "SavingsGoal",
     back_populates="user",
     cascade="all, delete-orphan",
+    planned_expenses = relationship(
+        "PlannedExpense", 
+        back_populates="user", 
+        cascade="all, delete-orphan"
+    )
 )

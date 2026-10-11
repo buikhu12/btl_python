@@ -21,3 +21,4 @@ class Category(Base):
     # Relationships
     user = relationship("User", back_populates="categories")
     transactions = relationship("Transaction", back_populates="category")
+    planned_expenses = relationship("PlannedExpense", back_populates="category")

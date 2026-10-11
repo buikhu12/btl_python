@@ -41,11 +41,19 @@ class TransactionService:
             wallet = WalletRepository(self.repository.db).create_default_wallet(user_id=user_id)
         
         tx_data = data.model_dump()
+        
         tx = Transaction(user_id=user_id, wallet_id=wallet.id, **tx_data)
+        if tx.type == 'expense' and tx.amount > wallet.balance:
+             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
+                                 detail="Mức chi tiêu vượt quá ngân sách")
+             
         created = self.repository.create(tx)
         
         change = data.amount if data.type == "income" else -data.amount
+       
+
         wallet.balance += change
+        
         self.repository.db.commit()
         return created
 

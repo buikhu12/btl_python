@@ -10,7 +10,7 @@ from app.models.transaction import Transaction
 from app.models.savings_goal import SavingsGoal
 from app.models.savings_contribution import SavingsContribution
 
-from app.routers import users, auth, transactions, categories, dashboard, ai, budgets, wallets
+from app.routers import users, auth, transactions, categories, dashboard, ai, budgets, wallets,planned_expenses
 
 from app.routers.savings_goals import router as savings_goals_router
 from app.routers.admin import router as admin_router
@@ -47,3 +47,4 @@ app.include_router(admin_router)
 app.include_router(savings_goals_router)
 app.include_router(budgets.router)
 app.include_router(wallets.router)
+app.include_router(planned_expenses.router)
