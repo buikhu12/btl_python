@@ -7,9 +7,9 @@ from app.core.database import Base
 class PlannedExpense(Base):
     __tablename__ = "planned_expenses"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    category_id = Column(BigInteger, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
     
     title = Column(String(255), nullable=False)  # Tiêu đề: "Tiền nhà tháng 10", "Bảo dưỡng xe"
     estimated_amount = Column(Numeric(15, 2), nullable=False)  # Số tiền dự tính chi

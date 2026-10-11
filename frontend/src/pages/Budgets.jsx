@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   PieChart as BudgetIcon,
   AlertTriangle,
@@ -11,11 +12,13 @@ import {
   Calendar,
   X,
   ShieldAlert,
-  Sparkles
+  Sparkles,
+  ArrowRight
 } from "lucide-react";
 import { getBudgetProgress, createBudget, updateBudget, getMyWallet } from "../services/api";
 
 export default function Budgets() {
+  const navigate = useNavigate();
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
@@ -304,6 +307,20 @@ export default function Budgets() {
                   </span>
                   <p className="text-[10px] text-slate-400">Để không bị bội chi</p>
                 </div>
+              </div>
+
+              {/* Liên kết tới Kế hoạch chi tiêu */}
+              <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <span className="text-xs text-slate-500 font-medium">
+                  Đã có ngân sách? Hãy lập kế hoạch dự tính chi tiết cho từng khoản để chủ động dòng tiền.
+                </span>
+                <button
+                  onClick={() => navigate("/plans")}
+                  className="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+                >
+                  <span>Xem Kế hoạch chi tiêu</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           </>

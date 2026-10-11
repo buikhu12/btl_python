@@ -280,6 +280,29 @@ export const updateBudget = async (month, year, data) => {
   return res.data;
 };
 
+// --- PLANNED EXPENSES APIS ---
+export const getPlannedExpenses = async (month, year) => {
+  const res = await api.get("/planned-expenses/", {
+    params: { month, year },
+  });
+  return res.data;
+};
+
+export const createPlannedExpense = async (data) => {
+  const res = await api.post("/planned-expenses/", data);
+  return res.data;
+};
+
+export const updatePlannedExpense = async (planId, data) => {
+  const res = await api.patch(`/planned-expenses/${planId}`, data);
+  return res.data;
+};
+
+export const deletePlannedExpense = async (planId) => {
+  const res = await api.delete(`/planned-expenses/${planId}`);
+  return res.data;
+};
+
 // --- ADMIN APIS ---
 export const getAdminUsers = async () => {
   const res = await api.get("/admin/users");

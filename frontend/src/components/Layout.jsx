@@ -15,6 +15,7 @@ import {
   CreditCard,
   Wallet,
   PieChart,
+  CalendarCheck,
   Menu
 } from "lucide-react";
 import { getCategories, createTransaction, createCategory, seedDefaultCategories } from "../services/api";
@@ -175,6 +176,7 @@ export default function Layout({ children }) {
     { name: "Sổ giao dịch", path: "/transactions", icon: ArrowLeftRight },
     { name: "Ví tiền của tôi", path: "/wallets", icon: Wallet },
     { name: "Hạn mức ngân sách", path: "/budgets", icon: PieChart },
+    { name: "Kế hoạch chi tiêu", path: "/plans", icon: CalendarCheck },
     { name: "Danh mục", path: "/categories", icon: FolderKanban },
     { name: "Mục tiêu tiết kiệm", path: "/savings", icon: PiggyBank },
     { name: "AI & Báo cáo", path: "/reports", icon: Sparkles },
@@ -219,6 +221,8 @@ export default function Layout({ children }) {
               const isActive =
                 item.path === "/"
                   ? location.pathname === "/"
+                  : item.path === "/plans"
+                  ? location.pathname.startsWith("/plans") || location.pathname.startsWith("/planned-expenses")
                   : item.path === "/reports"
                   ? location.pathname.startsWith("/reports") || location.pathname.startsWith("/ai")
                   : location.pathname.startsWith(item.path);

@@ -14,6 +14,7 @@ import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
 import Budgets from "./pages/Budgets";
 import Wallets from "./pages/Wallets";
+import PlannedExpenses from "./pages/PlannedExpenses";
 
 function App() {
   return (
@@ -64,6 +65,28 @@ function App() {
               <ProtectedRoute>
                 <Layout>
                   <Budgets />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/plans"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <PlannedExpenses />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/planned-expenses"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <PlannedExpenses />
                 </Layout>
               </ProtectedRoute>
             }
