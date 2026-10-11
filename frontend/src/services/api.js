@@ -240,9 +240,10 @@ export const getMonthlyReport = async (month, year) => {
   return res.data;
 };
 
-export const getAIAnalysis = async () => {
-  // Phân tích báo cáo tài chính bằng AI trong 180 ngày gần nhất
-  const res = await api.post("/ai/analyze-report");
+export const getAIAnalysis = async (period, month, year) => {
+  const res = await api.post("/ai/analyze-report", null, {
+    params: { period, month, year },
+  });
   return res.data;
 };
 

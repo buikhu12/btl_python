@@ -3,8 +3,9 @@
 import json
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from dotenv import load_dotenv
 from google import genai
@@ -16,7 +17,13 @@ from app.models.category import Category
 load_dotenv()
 
 
-def analyze_report(db: Session, user_id: int):
+def analyze_report(
+    db: Session,
+    user_id: int,
+    period: Literal["month", "year"] = "month",
+    year: int | None = None,
+    month: int | None = None,
+):
     api_key = os.getenv("GEMINI_API_KEY")
     model_name = os.getenv(
         "GEMINI_MODEL",
@@ -26,8 +33,24 @@ def analyze_report(db: Session, user_id: int):
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
 
-    # Lấy giao dịch của user hiện tại trong 6 tháng
-    cutoff = datetime.utcnow() - timedelta(days=180)
+    selected_year = year or datetime.utcnow().year
+    if period == "month":
+        selected_month = month or datetime.utcnow().month
+        if not 1 <= selected_month <= 12:
+            raise RuntimeError("month must be between 1 and 12")
+        start_date = datetime(selected_year, selected_month, 1)
+        end_date = (
+            datetime(selected_year + 1, 1, 1)
+            if selected_month == 12
+            else datetime(selected_year, selected_month + 1, 1)
+        )
+        period_label = f"Tháng {selected_month:02d}/{selected_year}"
+    elif period == "year":
+        start_date = datetime(selected_year, 1, 1)
+        end_date = datetime(selected_year + 1, 1, 1)
+        period_label = f"Năm {selected_year}"
+    else:
+        raise RuntimeError("period must be 'month' or 'year'")
 
     rows = (
         db.query(Transaction, Category.name.label("category_name"))
@@ -37,7 +60,8 @@ def analyze_report(db: Session, user_id: int):
         )
         .filter(
             Transaction.user_id == user_id,
-            Transaction.occurred_at >= cutoff
+            Transaction.occurred_at >= start_date,
+            Transaction.occurred_at < end_date,
         )
         .order_by(Transaction.occurred_at.asc())
         .limit(2000)
@@ -71,7 +95,7 @@ def analyze_report(db: Session, user_id: int):
             categories[category_name or "Uncategorized"] += amount
 
     report = {
-        "period": "Last 180 days",
+        "period": period_label,
         "transaction_count": len(rows),
         "total_income": float(total_income),
         "total_expense": float(total_expense),
@@ -96,28 +120,20 @@ def analyze_report(db: Session, user_id: int):
     if len(rows) == 0:
         return {
             "report": report,
-            "analysis": (
-                "📊 Báo cáo phân tích tài chính (180 ngày gần nhất)\n\n"
-                "• Bạn hiện chưa có dữ liệu giao dịch nào trong 180 ngày qua.\n"
-                "• Tổng thu nhập: 0 đ | Tổng chi tiêu: 0 đ | Số dư: 0 đ\n\n"
-                "💡 Gợi ý hành động từ AI:\n"
-                "1. Hãy bắt đầu ghi chép các giao dịch thu chi hàng ngày tại Lovely Money.\n"
-                "2. Thiết lập ngân sách chi tiêu và phân bổ thu nhập theo quy tắc 50/30/20.\n"
-                "3. Khi bạn ghi nhận các giao dịch thu chi, AI sẽ tự động phân tích chi tiết xu hướng và đưa ra lời khuyên tài chính tối ưu nhất cho bạn!"
-            ),
+            "analysis": f"No transactions were found for {period_label}. Start recording income and expenses to receive an AI analysis.",
         }
 
     prompt = f"""
 Bạn là trợ lý phân tích tài chính cá nhân.
 
-Hãy phân tích báo cáo tài chính dưới đây bằng tiếng Việt.
+Hãy phân tích báo cáo tài chính cho {period_label} dưới đây bằng tiếng Việt.
 
 Dữ liệu báo cáo:
 {json.dumps(report, ensure_ascii=False)}
 
 Yêu cầu:
 1. Tóm tắt thu nhập, chi tiêu và số dư.
-2. Phân tích xu hướng thu nhập và chi tiêu theo tháng.
+2. Nếu báo cáo theo năm, hãy nhận xét xu hướng thu nhập và chi tiêu qua các tháng; nếu theo tháng, tập trung nhận xét kỳ tháng đã chọn.
 3. Chỉ ra các danh mục chi tiêu lớn nhất.
 4. Nêu những dấu hiệu bất thường nếu dữ liệu thực sự cho thấy.
 5. Đề xuất 3 hành động thực tế để cải thiện tài chính.
@@ -149,7 +165,7 @@ Yêu cầu:
     top_cats_str = ", ".join([f"{name}: {int(amount):,} đ" for name, amount in top_cats]) if top_cats else "Chưa có danh mục cụ thể"
 
     fallback_analysis = (
-        f"📊 Phân tích sức khỏe tài chính (180 ngày gần nhất):\n\n"
+        f"Financial analysis for {period_label}:\n\n"
         f"1. Tổng quan dòng tiền:\n"
         f"• Tổng thu nhập: {int(report['total_income']):,} đ\n"
         f"• Tổng chi tiêu: {int(report['total_expense']):,} đ\n"

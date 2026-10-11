@@ -529,17 +529,15 @@ analytics_service.generate_monthly_report:
 - JOIN danh mục để xếp top 3 category chi tiêu.
 - needs_ratio và wants_ratio hiện gán các tỷ lệ quy ước 50/30, không suy ra từ dữ liệu chi tiết.
 
-A8. Client và service AI
+A8. Service AI và Gemini
 ------------------------
-app/clients/ai_client.py là lớp gọi Google Generative AI SDK; API key/model được cấu hình ở client. ai_service.py:
-1. Serialize summary bằng model_dump_json().
-2. Ghép dữ liệu vào prompt yêu cầu AI trả JSON theo schema.
-3. Bỏ dấu code fence nếu model bọc JSON trong markdown.
-4. json.loads parse chuỗi.
-5. AIReportResponse(**parsed_data) validate kết quả.
-6. Nếu bất kỳ bước nào exception, trả báo cáo mẫu với is_mock=True.
-
-Do catch Exception rộng, API AI có thể vẫn trả HTTP 200 với dữ liệu mẫu. Cần nhìn is_mock để biết kết quả có phải từ AI thật hay không.
+Endpoint AI nhận kỳ phân tích tháng hoặc năm tại /ai/analyze-report. app/services/ai_service.py:
+1. Đọc GEMINI_API_KEY và GEMINI_MODEL từ môi trường.
+2. Chọn khoảng ngày của tháng/năm được yêu cầu và chỉ truy vấn giao dịch của user hiện tại.
+3. Tổng hợp thu, chi, số dư thu chi, giao dịch theo tháng và chi tiêu theo danh mục.
+4. Gửi báo cáo tổng hợp trong prompt đến Google Gemini bằng google-genai SDK.
+5. Trả report (số liệu) và analysis (nội dung Gemini phân tích).
+6. Nếu kỳ đó chưa có giao dịch, trả thông báo rỗng mà không gọi Gemini. Nếu Gemini tạm lỗi, service tạo phân tích dự phòng theo số liệu tổng hợp.
 
 A9. Ví dụ request-to-database đầy đủ: POST /savings-goals/
 ------------------------------------------------------------
@@ -565,3 +563,23 @@ A10. Mã lỗi HTTP hay gặp
 - 500 Internal Server Error: lỗi chưa được xử lý, ví dụ response_model thiếu dữ liệu hoặc lỗi database.
 
 Khi debug endpoint, kiểm tra lần lượt: URL/method -> status code -> detail response -> schema input -> service -> repository/database -> response_model.
+
+A11. Tác dụng của các thư viện backend chính
+--------------------------------------------
+Các thư viện dưới đây được khai báo trong requirements.txt. Một số thư viện là dependency gián tiếp; phần này tập trung vào thư viện được ứng dụng dùng trực tiếp hoặc có vai trò nền tảng.
+
+- FastAPI: tạo HTTP API, khai báo router/endpoint, dependency injection, kiểm tra query/body và sinh OpenAPI docs.
+- Uvicorn: chạy ứng dụng FastAPI dưới dạng ASGI server trong lúc phát triển hoặc triển khai.
+- SQLAlchemy: ORM ánh xạ model Python thành bảng, xây dựng truy vấn, quản lý engine và database session.
+- PyMySQL: driver để SQLAlchemy kết nối MySQL khi DATABASE_URL dùng MySQL.
+- Pydantic: định nghĩa schema request/response và kiểm tra dữ liệu như email, độ dài mật khẩu, số tiền dương, loại giao dịch.
+- email-validator: hỗ trợ Pydantic kiểm tra định dạng EmailStr.
+- python-dotenv: đọc biến cấu hình từ file .env, ví dụ DATABASE_URL, SECRET_KEY, GEMINI_API_KEY và GEMINI_MODEL.
+- google-genai: SDK dùng để gửi prompt và nhận nội dung phân tích từ Google Gemini trong service AI.
+- PyJWT: tạo và giải mã JWT; backend dùng token để xác thực user và bảo vệ endpoint.
+- pwdlib: băm mật khẩu khi tạo/cập nhật user và xác minh mật khẩu khi đăng nhập.
+- argon2-cffi: thuật toán backend hỗ trợ pwdlib dùng cho password hashing theo cấu hình recommended.
+- Starlette: nền tảng ASGI bên dưới FastAPI; project dùng middleware CORS thông qua FastAPI/Starlette.
+- anyio, typing-extensions, annotated-types và các dependency đi kèm: hỗ trợ xử lý async/concurrency và kiểu dữ liệu mà FastAPI, Pydantic, SDK cần; thường không được gọi trực tiếp trong nghiệp vụ.
+
+Thư viện không thay thế logic nghiệp vụ: SQLAlchemy lưu dữ liệu nhưng quy tắc số dư ví vẫn phải được kiểm tra trong service; Gemini tạo nội dung phân tích nhưng dữ liệu giao dịch được backend tổng hợp và kiểm soát trước khi gửi.

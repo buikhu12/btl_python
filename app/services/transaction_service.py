@@ -39,13 +39,21 @@ class TransactionService:
         wallet = WalletRepository(self.repository.db).get_by_user_id(user_id)
         if not wallet:
             wallet = WalletRepository(self.repository.db).create_default_wallet(user_id=user_id)
-        
+
+        change = data.amount 
+        if data.type == "income":
+            wallet.balance += change
+        else :
+            if change > wallet.balance:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f'Ngân sách không đủ'
+                )
         tx_data = data.model_dump()
         tx = Transaction(user_id=user_id, wallet_id=wallet.id, **tx_data)
         created = self.repository.create(tx)
         
-        change = data.amount if data.type == "income" else -data.amount
-        wallet.balance += change
+        
         self.repository.db.commit()
         return created
 

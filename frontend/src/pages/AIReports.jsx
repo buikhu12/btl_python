@@ -17,6 +17,7 @@ export default function AIReports() {
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
+  const [aiPeriod, setAiPeriod] = useState("month");
 
   const [loadingReport, setLoadingReport] = useState(true);
   const [loadingAI, setLoadingAI] = useState(false);
@@ -46,7 +47,7 @@ export default function AIReports() {
     setLoadingAI(true);
     setAiError("");
     try {
-      const data = await getAIAnalysis();
+      const data = await getAIAnalysis(aiPeriod, selectedMonth, selectedYear);
       setAiData(data);
     } catch (err) {
       console.error("Lỗi khi gọi AI phân tích:", err);
@@ -64,7 +65,7 @@ export default function AIReports() {
   // Tự động phân tích AI khi vào trang
   useEffect(() => {
     runAIAnalysis();
-  }, []);
+  }, [aiPeriod, selectedMonth, selectedYear]);
 
   return (
     <div className="flex-1 flex flex-col bg-[#f8fafc]">
@@ -77,7 +78,7 @@ export default function AIReports() {
               Gemini AI
             </span>
           </h1>
-          <p className="text-xs text-slate-400 mt-0.5">Phân tích dữ liệu giao dịch trong 180 ngày gần nhất</p>
+          <p className="text-xs text-slate-400 mt-0.5">Báo cáo AI theo {aiPeriod === "month" ? "tháng" : "năm"} đã chọn</p>
         </div>
 
         {/* BỘ CHỌN THÁNG & NĂM */}
@@ -228,14 +229,25 @@ export default function AIReports() {
               </div>
             </div>
 
-            <button
-              onClick={runAIAnalysis}
-              disabled={loadingAI}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-500/20 transition disabled:opacity-60"
-            >
-              <Zap className={`w-4 h-4 ${loadingAI ? "animate-spin" : ""}`} />
-              <span>{loadingAI ? "AI đang phân tích..." : "Phân tích với AI ngay"}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <select
+                value={aiPeriod}
+                onChange={(e) => setAiPeriod(e.target.value)}
+                className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700"
+                aria-label="Kỳ phân tích AI"
+              >
+                <option value="month">AI theo tháng</option>
+                <option value="year">AI theo năm</option>
+              </select>
+              <button
+                onClick={runAIAnalysis}
+                disabled={loadingAI}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-500/20 transition disabled:opacity-60"
+              >
+                <Zap className={`w-4 h-4 ${loadingAI ? "animate-spin" : ""}`} />
+                <span>{loadingAI ? "AI đang phân tích..." : "Phân tích với AI ngay"}</span>
+              </button>
+            </div>
           </div>
 
           {/* AI RESULT */}
@@ -248,7 +260,7 @@ export default function AIReports() {
             <div className="space-y-6 animate-in fade-in duration-300">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div className="p-6 rounded-3xl border bg-white flex flex-col justify-center gap-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Tổng hợp 180 ngày</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Tổng hợp: {aiData.report?.period}</span>
                   <span className="text-sm font-semibold text-emerald-600">Thu: {formatVND(aiData.report?.total_income)}</span>
                   <span className="text-sm font-semibold text-rose-600">Chi: {formatVND(aiData.report?.total_expense)}</span>
                   <span className="text-sm font-semibold text-slate-700">Số dư thu chi: {formatVND(aiData.report?.balance)}</span>
