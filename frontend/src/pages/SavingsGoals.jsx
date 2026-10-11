@@ -30,9 +30,9 @@ export default function SavingsGoals() {
   // Modal tạo mục tiêu
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
-    title: "",
+    name: "",
     target_amount: "",
-    target_date: "",
+    deadline: "",
     description: "",
   });
   const [createSubmitting, setCreateSubmitting] = useState(false);
@@ -71,22 +71,22 @@ export default function SavingsGoals() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!createForm.title || !createForm.target_amount) {
-      alert("Vui lòng điền tiêu đề và số tiền mục tiêu!");
+    if (!createForm.name || !createForm.target_amount) {
+      alert("Vui lòng điền tên mục tiêu và số tiền mục tiêu!");
       return;
     }
 
     setCreateSubmitting(true);
     try {
       await createSavingsGoal({
-        title: createForm.title,
+        name: createForm.name,
         target_amount: parseFloat(createForm.target_amount),
-        target_date: createForm.target_date ? new Date(createForm.target_date).toISOString() : null,
+        deadline: createForm.deadline ? new Date(createForm.deadline).toISOString() : null,
         description: createForm.description || null,
       });
 
       setShowCreateModal(false);
-      setCreateForm({ title: "", target_amount: "", target_date: "", description: "" });
+      setCreateForm({ name: "", target_amount: "", deadline: "", description: "" });
       loadGoals();
     } catch (err) {
       alert(err.response?.data?.detail || "Không thể tạo mục tiêu!");
@@ -214,7 +214,7 @@ export default function SavingsGoals() {
                     </div>
                   </div>
 
-                  <h3 className="font-extrabold text-base text-slate-800">{goal.title}</h3>
+                  <h3 className="font-extrabold text-base text-slate-800">{goal.name || goal.title}</h3>
                   {goal.description && (
                     <p className="text-xs text-slate-400 mt-1 line-clamp-2">{goal.description}</p>
                   )}
@@ -245,11 +245,13 @@ export default function SavingsGoals() {
                     </div>
                   </div>
 
-                  {/* Target date */}
-                  {goal.target_date && (
+                  {/* Deadline */}
+                  {(goal.deadline || goal.target_date) && (
                     <div className="mt-4 flex items-center gap-1.5 text-xs text-slate-400">
                       <Calendar className="w-3.5 h-3.5" />
-                      <span>Hạn: {new Date(goal.target_date).toLocaleDateString("vi-VN")}</span>
+                      <span>
+                        Hạn: {new Date(goal.deadline || goal.target_date).toLocaleDateString("vi-VN")}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -300,8 +302,8 @@ export default function SavingsGoals() {
                   type="text"
                   required
                   placeholder="Ví dụ: Mua iPhone mới, Quỹ khẩn cấp..."
-                  value={createForm.title}
-                  onChange={(e) => setCreateForm({ ...createForm, title: e.target.value })}
+                  value={createForm.name}
+                  onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
                 />
               </div>
@@ -322,8 +324,8 @@ export default function SavingsGoals() {
                 <label className="block text-xs font-bold text-slate-600 mb-1">Ngày dự kiến hoàn thành</label>
                 <input
                   type="date"
-                  value={createForm.target_date}
-                  onChange={(e) => setCreateForm({ ...createForm, target_date: e.target.value })}
+                  value={createForm.deadline}
+                  onChange={(e) => setCreateForm({ ...createForm, deadline: e.target.value })}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
                 />
               </div>
@@ -361,7 +363,7 @@ export default function SavingsGoals() {
             <h2 className="text-lg font-black text-slate-800">
               {actionType === "deposit" ? "Nạp tiền tiết kiệm" : "Rút tiền tiết kiệm"}
             </h2>
-            <p className="text-xs text-slate-400 mb-5">{activeGoal.title}</p>
+            <p className="text-xs text-slate-400 mb-5">{activeGoal.name || activeGoal.title}</p>
 
             <form onSubmit={handleActionSubmit} className="space-y-4">
               <div>
@@ -413,14 +415,14 @@ export default function SavingsGoals() {
               <X className="w-5 h-5" />
             </button>
             <h2 className="text-lg font-black text-slate-800">Lịch Sử Tích Lũy</h2>
-            <p className="text-xs text-slate-400 mb-5">{historyGoal.title}</p>
+            <p className="text-xs text-slate-400 mb-5">{historyGoal.name || historyGoal.title}</p>
 
             <div className="max-h-72 overflow-y-auto space-y-2.5 pr-1">
               {loadingHistory ? (
                 <div className="py-8 text-center text-slate-400 text-xs">Đang tải lịch sử...</div>
               ) : historyList.length > 0 ? (
                 historyList.map((item) => {
-                  const isDeposit = item.type === "deposit";
+                  const isDeposit = item.type?.toUpperCase() === "DEPOSIT";
                   return (
                     <div
                       key={item.id}

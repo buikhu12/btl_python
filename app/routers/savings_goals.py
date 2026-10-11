@@ -143,9 +143,16 @@ def deposit_money(
     data.note
 )
 
-    if error:
+    # Mục tiêu không tồn tại là 404; ví không đủ tiền là lỗi nghiệp vụ 400.
+    if error == "Savings goal not found":
         raise HTTPException(
             status_code=404,
+            detail=error
+        )
+
+    if error == "Insufficient wallet balance":
+        raise HTTPException(
+            status_code=400,
             detail=error
         )
 

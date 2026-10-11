@@ -6,11 +6,14 @@ from app.models.savings_goal import SavingsGoal
 from app.repositories.savings_goal_repository import SavingsGoalRepository
 from app.schemas.savings_goal import SavingsGoalCreate, SavingsGoalUpdate
 from app.models.savings_contribution import SavingsContribution
+from app.models.wallet import Wallet
+from app.repositories.wallet_repository import WalletRepository
 
 class SavingsGoalService:
 
     def __init__(self, db: Session):
         self.repository = SavingsGoalRepository(db)
+        self.wallet_repository = WalletRepository(db)
 
     # CREATE
     def create_goal(self, user_id: int, data: SavingsGoalCreate):
@@ -24,7 +27,8 @@ class SavingsGoalService:
             description=data.description
         )
 
-        return self.repository.create(savings_goal)
+        saved_goal = self.repository.create(savings_goal)
+        return self._format_goal(saved_goal)
 
     # LIST
     def get_all_goals(self, user_id: int):
@@ -135,10 +139,17 @@ class SavingsGoalService:
             goal_id,
             user_id
         )
-
+        
         if goal is None:
             return None, "Savings goal not found"
 
+        # Tiền nạp vào hũ phải có sẵn trong ví; không cho phép ví bị âm.
+        wallet = self.wallet_repository.get_by_user_id(user_id)
+        if wallet is None or wallet.balance < amount:
+            return None, "Insufficient wallet balance"
+
+        # Cập nhật ví, số dư hũ và lịch sử trong cùng session/commit.
+        wallet.balance -= amount
         goal.current_amount += amount
 
         contribution = SavingsContribution(
@@ -173,6 +184,18 @@ class SavingsGoalService:
         if amount > goal.current_amount:
             return None, "Insufficient savings balance"
 
+        # Tiền rút khỏi hũ được hoàn về ví; nếu user chưa có ví thì tạo ví trong cùng transaction.
+        wallet = self.wallet_repository.get_by_user_id(user_id)
+        if wallet is None:
+            wallet = Wallet(
+                user_id=user_id,
+                name="Ví chính",
+                balance=Decimal("0.00"),
+                currency="VND",
+            )
+            self.repository.db.add(wallet)
+
+        wallet.balance += amount
         goal.current_amount -= amount
 
         contribution = SavingsContribution(

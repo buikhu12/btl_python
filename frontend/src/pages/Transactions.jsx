@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -38,6 +38,7 @@ export default function Transactions() {
     type: "expense",
     category_id: "",
     note: "",
+    occurred_at: new Date().toISOString().slice(0, 16),
   });
   const [formSubmitting, setFormSubmitting] = useState(false);
 
@@ -70,6 +71,19 @@ export default function Transactions() {
     loadData();
   }, [loadData]);
 
+  // Tra cứu category_name từ categories khi backend không trả trường này
+  const categoryMap = useMemo(() => {
+    const map = {};
+    categories.forEach((c) => {
+      map[c.id] = c.name;
+    });
+    return map;
+  }, [categories]);
+
+  const getCategoryName = (tx) => {
+    return tx.category_name || categoryMap[tx.category_id] || "Chưa phân loại";
+  };
+
   const handleOpenCreate = () => {
     setEditingTx(null);
     setFormData({
@@ -77,6 +91,7 @@ export default function Transactions() {
       type: "expense",
       category_id: categories.find((c) => c.type === "expense")?.id || categories[0]?.id || "",
       note: "",
+      occurred_at: new Date().toISOString().slice(0, 16),
     });
     setShowModal(true);
   };
@@ -88,33 +103,49 @@ export default function Transactions() {
       type: tx.type,
       category_id: tx.category_id || "",
       note: tx.note || "",
+      occurred_at: tx.occurred_at
+        ? new Date(tx.occurred_at).toISOString().slice(0, 16)
+        : new Date().toISOString().slice(0, 16),
     });
     setShowModal(true);
   };
 
+  const handleTypeChange = (newType) => {
+    const matched = categories.find((c) => c.type === newType);
+    setFormData((prev) => ({
+      ...prev,
+      type: newType,
+      category_id: matched ? matched.id : "",
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.amount || !formData.category_id) {
-      alert("Vui lòng điền đủ thông tin!");
+    if (!formData.amount) {
+      alert("Vui lòng nhập số tiền!");
+      return;
+    }
+    if (!formData.category_id) {
+      alert("Vui lòng chọn danh mục phù hợp trước khi gửi!");
       return;
     }
 
     setFormSubmitting(true);
     try {
+      const payload = {
+        amount: parseFloat(formData.amount),
+        type: formData.type,
+        category_id: parseInt(formData.category_id),
+        note: formData.note,
+        occurred_at: formData.occurred_at
+          ? new Date(formData.occurred_at).toISOString()
+          : new Date().toISOString(),
+      };
+
       if (editingTx) {
-        await updateTransaction(editingTx.id, {
-          amount: parseFloat(formData.amount),
-          type: formData.type,
-          category_id: parseInt(formData.category_id),
-          note: formData.note,
-        });
+        await updateTransaction(editingTx.id, payload);
       } else {
-        await createTransaction({
-          amount: parseFloat(formData.amount),
-          type: formData.type,
-          category_id: parseInt(formData.category_id),
-          note: formData.note,
-        });
+        await createTransaction(payload);
       }
 
       setShowModal(false);
@@ -144,7 +175,7 @@ export default function Transactions() {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
     const noteMatch = tx.note?.toLowerCase().includes(term);
-    const catMatch = tx.category_name?.toLowerCase().includes(term);
+    const catMatch = getCategoryName(tx).toLowerCase().includes(term);
     return noteMatch || catMatch;
   });
 
@@ -272,7 +303,7 @@ export default function Transactions() {
 
                         <td className="py-4 px-6">
                           <span className="px-3 py-1 rounded-xl bg-slate-100 text-slate-700 font-semibold">
-                            {tx.category_name || "Chưa phân loại"}
+                            {getCategoryName(tx)}
                           </span>
                         </td>
 
@@ -352,7 +383,7 @@ export default function Transactions() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, type: "expense" })}
+                    onClick={() => handleTypeChange("expense")}
                     className={`py-2 text-xs font-bold rounded-xl border transition ${
                       formData.type === "expense"
                         ? "bg-rose-50 border-rose-500 text-rose-600"
@@ -363,7 +394,7 @@ export default function Transactions() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, type: "income" })}
+                    onClick={() => handleTypeChange("income")}
                     className={`py-2 text-xs font-bold rounded-xl border transition ${
                       formData.type === "income"
                         ? "bg-emerald-50 border-emerald-500 text-emerald-600"
@@ -392,8 +423,12 @@ export default function Transactions() {
                 <select
                   value={formData.category_id}
                   onChange={(e) => setFormData({ ...formData, category_id: e.target.value })}
+                  required
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
                 >
+                  {!formData.category_id && (
+                    <option value="">-- Chọn danh mục --</option>
+                  )}
                   {categories
                     .filter((c) => c.type === formData.type)
                     .map((cat) => (
@@ -401,7 +436,23 @@ export default function Transactions() {
                         {cat.name}
                       </option>
                     ))}
+                  {categories.filter((c) => c.type === formData.type).length === 0 && (
+                    <option value="" disabled>
+                      Chưa có danh mục loại này
+                    </option>
+                  )}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Thời gian</label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={formData.occurred_at}
+                  onChange={(e) => setFormData({ ...formData, occurred_at: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 font-semibold"
+                />
               </div>
 
               <div>

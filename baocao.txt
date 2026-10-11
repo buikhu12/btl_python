@@ -1,0 +1,567 @@
+﻿BÁO CÁO GIẢI THÍCH BACKEND
+Project FastAPI quản lý tài chính cá nhân
+
+Mục đích
+-------
+Tài liệu này giải thích phần backend: cách ứng dụng khởi động, cách dữ liệu đi qua các lớp, các model và quan hệ giữa chúng, các API chính, xác thực/phân quyền, và một số điểm cần biết khi đọc mã. Frontend không nằm trong phạm vi báo cáo.
+
+1. Cấu trúc xử lý một request
+-----------------------------
+Một request thường đi theo chuỗi:
+
+Client -> Router -> Schema -> Service -> Repository -> SQLAlchemy Model -> Database
+
+- Router (app/routers): khai báo URL, HTTP method, dependency và response model.
+- Schema (app/schemas): kiểm tra dữ liệu đầu vào và định dạng dữ liệu trả về bằng Pydantic.
+- Service (app/services): xử lý nghiệp vụ, ví dụ kiểm tra danh mục hoặc tính tiến độ ngân sách.
+- Repository (app/repositories): đọc/ghi dữ liệu bằng SQLAlchemy.
+- Model (app/models): mô tả bảng, cột, khóa ngoại và quan hệ trong database.
+
+Ví dụ tạo giao dịch:
+POST /transactions/ -> TransactionCreate kiểm tra dữ liệu -> TransactionService xác minh danh mục và tìm ví -> TransactionRepository lưu -> TransactionResponse định dạng phản hồi.
+
+2. Các model trong app/models
+-----------------------------
+Model là ánh xạ giữa lớp Python và bảng trong database. Column mô tả cột; ForeignKey tạo liên kết giữa bảng; relationship cho phép truy cập quan hệ dưới dạng đối tượng Python.
+
+2.1 User — app/models/user.py — bảng users
+- id: khóa chính người dùng.
+- username, email: thông tin đăng nhập/liên hệ; cả hai có unique để tránh trùng.
+- password_hash: chỉ lưu mật khẩu đã băm, không lưu mật khẩu gốc.
+- role: vai trò, mặc định USER; ADMIN được dùng cho quyền quản trị.
+- wallet, budgets, transactions, categories, savings_goals: các quan hệ đến dữ liệu thuộc người dùng.
+- cascade="all, delete-orphan" trên các quan hệ có nghĩa dữ liệu con được quản lý cùng user và bị xóa theo user.
+
+2.2 Category — app/models/category.py — bảng categories
+- id: khóa chính.
+- user_id: chủ sở hữu; hiện nullable=True, nên bảng cho phép danh mục không gắn với user.
+- name: tên danh mục.
+- type: loại thu nhập hoặc chi tiêu (income/expense).
+- icon, color: thông tin trình bày tùy chọn.
+- UniqueConstraint(user_id, name, type): ngăn một user tạo danh mục trùng tên cùng loại.
+- Quan hệ user và transactions: một danh mục thuộc user và có thể được nhiều giao dịch tham chiếu.
+
+2.3 Transaction — app/models/transaction.py — bảng transactions
+- id: khóa chính.
+- user_id: người sở hữu giao dịch; xóa user thì giao dịch bị xóa theo.
+- category_id: danh mục; nullable để giao dịch có thể không có danh mục. Xóa danh mục đặt khóa này thành NULL.
+- wallet_id: ví liên quan; hiện bắt buộc.
+- type: income hoặc expense.
+- amount: số tiền Numeric(15,2), phù hợp lưu tiền có phần thập phân.
+- note: ghi chú tùy chọn.
+- occurred_at: ngày giờ giao dịch; mặc định là thời điểm UTC hiện tại.
+- Quan hệ wallet, user, category được khai báo bằng relationship và back_populates ở hai phía.
+
+2.4 Wallet — app/models/wallet.py — bảng wallets
+- id: khóa chính.
+- user_id: chủ ví, unique nên mỗi user có tối đa một ví.
+- name: tên ví, mặc định “Ví chính”.
+- balance: số dư, mặc định 0.
+- currency: đơn vị tiền, mặc định VND.
+- created_at, updated_at: thời điểm tạo và cập nhật.
+- Quan hệ user là một-một; transactions là các giao dịch ghi vào ví.
+
+2.5 Budget — app/models/budget.py — bảng budgets
+- id: khóa chính.
+- user_id: chủ ngân sách.
+- amount_limit: hạn mức chi tiêu.
+- month, year: kỳ ngân sách.
+- created_at: thời điểm tạo.
+- UniqueConstraint(user_id, month, year): mỗi user chỉ có một ngân sách cho mỗi tháng/năm.
+- Quan hệ user liên kết ngược với User.budgets.
+
+2.6 SavingsGoal — app/models/savings_goal.py — bảng savings_goals
+- id, user_id: khóa chính và chủ mục tiêu.
+- name: tên mục tiêu.
+- target_amount: số tiền cần đạt.
+- current_amount: số tiền đã tích lũy, mặc định 0.
+- deadline: ngày dự kiến hoàn thành, có thể bỏ trống.
+- description: mô tả tùy chọn.
+- created_at: thời điểm tạo.
+- Quan hệ user và contributions liên kết tới người sở hữu và lịch sử nạp/rút.
+- Service tính remaining_amount = max(target_amount - current_amount, 0) và progress = current_amount / target_amount * 100 để trả API; đây là các giá trị tính toán, không phải cột database.
+
+2.7 SavingsContribution — app/models/savings_contribution.py — bảng savings_contributions
+- id: khóa chính.
+- savings_goal_id: mục tiêu liên quan; xóa mục tiêu thì các dòng lịch sử bị xóa theo.
+- amount: số tiền thay đổi.
+- type: loại hoạt động, hiện service ghi DEPOSIT hoặc WITHDRAW.
+- note: ghi chú tùy chọn.
+- created_at: thời điểm ghi nhận.
+- Model này là lịch sử thay đổi số dư mục tiêu; SavingsGoal.current_amount là số dư hiện tại.
+
+3. Khởi động ứng dụng và kết nối database
+-----------------------------------------
+app/main.py
+- Tạo FastAPI app.
+- Nạp model để SQLAlchemy biết các bảng.
+- Base.metadata.create_all(bind=engine) tạo các bảng còn thiếu khi khởi động. Đây không phải hệ thống migration; thay đổi cấu trúc bảng đã tồn tại nên dùng công cụ migration trong môi trường thực tế.
+- CORS cho phép frontend localhost:5173 và 127.0.0.1:5173.
+- include_router đăng ký các router user, auth, transaction, category, dashboard, AI, report, admin, savings, budget và wallet.
+
+app/core/database.py
+- load_dotenv() đọc biến môi trường từ .env.
+- DATABASE_URL được dùng tạo SQLAlchemy engine.
+- SessionLocal tạo session database cho từng request.
+- Base là lớp gốc các model kế thừa.
+- get_db() mở session, yield cho endpoint/service, rồi luôn đóng session trong finally.
+
+4. Xác thực, mật khẩu và quyền
+------------------------------
+app/security/password.py
+- PasswordHash.recommended() chọn thuật toán băm mật khẩu khuyến nghị của pwdlib.
+- hash_password() băm mật khẩu khi tạo user hoặc đổi mật khẩu.
+- verify_password() so mật khẩu nhập vào với hash đã lưu.
+
+app/security/jwt.py
+- Đọc SECRET_KEY từ môi trường.
+- Dùng HS256 để ký JWT; token chứa sub là user id và exp là thời điểm hết hạn (60 phút).
+- create_access_token() tạo token sau khi đăng nhập thành công.
+
+app/dependencies/auth.py
+- HTTPBearer yêu cầu request gửi Authorization: Bearer <token>.
+- get_current_user() xác minh chữ ký/hạn token, đọc sub, tìm user trong database; token sai/hết hạn hoặc user không còn tồn tại trả 401.
+- require_admin() kiểm tra current_user.role == ADMIN; không đạt trả 403.
+- Các endpoint dùng Depends(get_current_user) cần đăng nhập. Endpoint admin dùng require_admin.
+
+5. Schema (app/schemas)
+-----------------------
+Schema không phải bảng database; đây là hợp đồng dữ liệu HTTP.
+- user.py: UserCreate kiểm tra username/email/password khi đăng ký; UserUpdate cho phép cập nhật; UserResponse chỉ trả thông tin công khai; AdminResetPassword nhận mật khẩu mới.
+- auth.py: LoginRequest nhận email/password; TokenRespone định dạng access_token và token_type.
+- transaction.py: giới hạn type vào income/expense, amount phải dương, note có giới hạn; TransactionResponse dùng from_attributes để đọc thuộc tính từ SQLAlchemy object.
+- category.py: kiểm tra tên, loại thu/chi, icon/color; schema cập nhật cho phép các trường tùy chọn.
+- wallet.py: dữ liệu ví; WalletUpdate hiện cho phép cập nhật cả name và balance.
+- budget.py: kiểm tra hạn mức dương và month 1..12; BudgetProgressResponse chứa tiền đã chi, còn lại, phần trăm, trạng thái cảnh báo.
+- savings_goal.py: dữ liệu tạo/cập nhật mục tiêu, yêu cầu nạp/rút và response mục tiêu/lịch sử.
+- dashboard.py, report.py, ai.py: định nghĩa các cấu trúc kết quả thống kê, báo cáo tháng và tư vấn AI.
+
+6. Router và các API chính
+--------------------------
+- app/routers/users.py: POST /users/ đăng ký; GET /users/me lấy hồ sơ; PATCH /users/me cập nhật; DELETE /users/me xóa tài khoản.
+- app/routers/auth.py: POST /auth/login đăng nhập và trả JWT.
+- app/routers/transactions.py: GET/POST /transactions/, GET/PATCH/DELETE /transactions/{id}; dữ liệu được giới hạn theo current_user.
+- app/routers/categories.py: CRUD danh mục thuộc user hiện tại.
+- app/routers/wallets.py: GET /wallets/me lấy/tạo ví mặc định; PATCH /wallets/me cập nhật ví.
+- app/routers/budgets.py: POST /budgets/ tạo hạn mức; GET /budgets/progress lấy tiến độ theo tháng/năm; PATCH /budgets/ cập nhật hạn mức.
+- app/routers/savings_goals.py: tạo/liệt kê/xem/sửa/xóa mục tiêu, nạp/rút và đọc lịch sử.
+- app/routers/dashboard.py: tổng quan, chi tiêu theo danh mục, thống kê tháng và giao dịch gần đây.
+- app/routers/report.py: báo cáo tài chính tháng.
+- app/routers/ai.py: phân tích báo cáo tháng bằng AI.
+- app/routers/admin.py: danh sách user, cập nhật thông tin và reset mật khẩu; các thao tác cần quyền ADMIN.
+
+7. Service layer (app/services)
+-------------------------------
+- auth_service.py: tìm user theo email, kiểm tra mật khẩu, tạo token.
+- user_service.py: tạo user role USER, kiểm tra email/username trùng, băm mật khẩu; xử lý cập nhật/xóa user.
+- transaction_service.py: kiểm tra danh mục có thuộc user và đúng loại giao dịch; tạo giao dịch, chọn ví, cập nhật số dư; xóa giao dịch thì điều chỉnh lại số dư.
+- category_service.py: chuẩn hóa tên, phát hiện trùng danh mục, tạo/sửa/xóa.
+- wallet_service.py: lấy hoặc khởi tạo ví, cập nhật tên/số dư, có hàm điều chỉnh số dư theo thu/chi.
+- budget_service.py: tạo/cập nhật ngân sách; tổng hợp giao dịch expense trong tháng và xác định NORMAL, YELLOW_WARNING hoặc RED_OVERBUDGET.
+- savings_goal_service.py: tạo, lấy, sửa, xóa mục tiêu; tính phần còn lại/tiến độ; ghi nhận nạp/rút và lịch sử.
+- dashboard_service.py: ghép các truy vấn repository thành số liệu dashboard.
+- analytics_service.py: tổng thu/chi, tiết kiệm ròng, tỷ lệ tiết kiệm và danh mục chi nhiều nhất.
+- ai_service.py: gửi dữ liệu tổng hợp tới client AI, phân tích JSON; nếu gọi AI hoặc parse kết quả lỗi thì trả kết quả mẫu is_mock=True.
+- savings_contribution_service.py: kiểm tra mục tiêu thuộc user trước khi đọc lịch sử đóng góp.
+
+8. Repository layer (app/repositories)
+---------------------------------------
+Repository giữ các câu truy vấn SQLAlchemy để service không phải viết truy vấn trực tiếp cho mọi thao tác.
+- user_repository: tìm user theo id/email/username và CRUD.
+- transaction_repository: lọc theo user, danh mục, loại, ngày; CRUD giao dịch.
+- category_repository: lọc và tìm danh mục thuộc một user.
+- wallet_repository: tìm/tạo ví mặc định và cộng/trừ số dư.
+- budget_repository: tìm ngân sách theo user/tháng/năm; tạo và cập nhật hạn mức.
+- savings_goal_repository: CRUD mục tiêu của một user.
+- savings_contribution_repository: lưu và đọc lịch sử nạp/rút.
+- dashboard_repository: các phép tổng hợp SQL cho dashboard.
+
+9. Luồng nghiệp vụ mẫu
+----------------------
+Đăng ký:
+POST /users/ -> UserCreate xác thực -> UserService kiểm tra trùng -> hash_password -> UserRepository.create -> trả UserResponse (không trả password_hash).
+
+Đăng nhập:
+POST /auth/login -> LoginRequest -> AuthService tìm email và verify_password -> create_access_token -> trả access_token.
+
+Tạo giao dịch:
+POST /transactions/ -> yêu cầu JWT -> TransactionCreate xác thực -> service kiểm tra category -> tìm/tạo wallet -> ghi Transaction -> cập nhật balance ví -> trả TransactionResponse.
+
+Tạo mục tiêu tiết kiệm:
+POST /savings-goals/ -> yêu cầu JWT -> validate SavingsGoalCreate -> tạo mục tiêu với current_amount=0 -> repository commit/refresh -> service định dạng response có remaining_amount/progress.
+
+10. Các điểm cần lưu ý khi phát triển
+-------------------------------------
+- Token response schema hiện chỉ định nghĩa access_token và token_type. AuthService cũng trả user, nhưng TokenRespone không khai báo trường đó nên response model có thể loại bỏ; client cần gọi /users/me để lấy hồ sơ.
+- TransactionService có điều chỉnh số dư ví khi tạo và xóa giao dịch. Trong update_transaction hiện chỉ sửa giao dịch, chưa tính lại phần chênh lệch số dư ví; sửa amount/type sau này có thể làm balance lệch.
+- WalletUpdate cho phép client cập nhật balance trực tiếp. Cách này tiện cho thao tác nạp thủ công nhưng không tự tạo bản ghi giao dịch lịch sử.
+- BudgetService tính current_wallet_balance lúc tạo ngân sách nhưng giá trị này hiện không được dùng để từ chối hạn mức lớn hơn số dư.
+- Báo cáo đặt needs_ratio=50 và wants_ratio=30 khi có thu nhập; đây là giá trị quy ước, không phải phân tích thực tế theo từng loại giao dịch.
+- app/main.py gọi create_all khi import ứng dụng. Với thay đổi schema lâu dài, cần migration thay vì trông chờ create_all cập nhật bảng cũ.
+- SECRET_KEY và DATABASE_URL phải có trong .env/môi trường. Không đưa giá trị bí mật vào log hoặc mã nguồn.
+
+Kết luận
+--------
+Backend được chia theo lớp khá rõ: router nhận request, schema xác thực dữ liệu, service xử lý nghiệp vụ, repository truy cập database, model định nghĩa bảng. Các model trung tâm là User, Category, Transaction, Wallet, Budget, SavingsGoal và SavingsContribution. Khi lỗi API, nên lần theo đúng chuỗi router -> schema -> service -> repository -> model/database để tìm lớp gây lỗi.
+
+PHỤ LỤC A — ĐỌC CODE THEO TỪNG ĐOẠN
+====================================
+
+A1. Cách đọc một khai báo model SQLAlchemy
+-----------------------------------------
+Ví dụ rút gọn từ Transaction:
+
+    class Transaction(Base):
+        __tablename__ = "transactions"
+        id = Column(Integer, primary_key=True, index=True)
+        user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+Giải thích từng dòng:
+- class Transaction(Base): tạo lớp Python tên Transaction và đăng ký nó với SQLAlchemy Base. SQLAlchemy dùng lớp này để tạo/truy vấn bảng.
+- __tablename__ chỉ rõ tên bảng database. Tên này phải khớp với chuỗi được dùng trong ForeignKey.
+- Column(Integer, ...): khai báo một cột kiểu số nguyên.
+- primary_key=True: cột là định danh duy nhất mỗi dòng.
+- index=True: yêu cầu database tạo chỉ mục để tìm kiếm/lọc nhanh hơn.
+- ForeignKey("users.id"): giá trị user_id phải tham chiếu đến id của một dòng trong bảng users.
+- nullable=False: cột bắt buộc phải có giá trị.
+
+A2. Giải thích chi tiết từng model
+----------------------------------
+
+MODEL User — app/models/user.py
+
+    class User(Base):
+        __tablename__ = "users"
+
+Lớp được ánh xạ tới bảng users. Tên lớp là số ít theo quy ước Python, tên bảng cũng có thể khác.
+
+    id = Column(Integer, primary_key=True, index=True)
+
+id định danh một user. Khóa chính được database quản lý và thường tự tăng.
+
+    username = Column(String(50), unique=True, nullable=False)
+    email = Column(String(100), unique=True, nullable=False)
+
+String(50)/String(100) giới hạn độ dài. unique=True tạo ràng buộc không trùng ở database, còn nullable=False bắt buộc có dữ liệu. Service còn kiểm tra trùng trước khi insert để trả lỗi dễ hiểu; ràng buộc database vẫn là lớp bảo vệ cuối cùng.
+
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(20), nullable=False, default="USER")
+
+password_hash chứa chuỗi đã băm. Mật khẩu người dùng không được ghi vào cột này ở dạng nguyên bản. role xác định quyền; default chỉ được áp dụng khi tạo bản ghi mà không truyền role.
+
+    wallet = relationship("Wallet", back_populates="user", uselist=False, ...)
+
+relationship tạo liên kết object Python, không tự tạo cột mới. "Wallet" là tên model được resolve sau khi các model được nạp. back_populates="user" phải trùng với Wallet.user. uselist=False nói quan hệ một-một: user.wallet là một object hoặc None, không phải danh sách.
+
+    budgets = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
+
+Đây là quan hệ một-nhiều; user.budgets trả danh sách. cascade đồng bộ thao tác với các bản ghi con. delete-orphan xóa bản ghi con khi nó bị tách khỏi user.
+
+transactions, categories, savings_goals có cùng kiểu quan hệ một-nhiều. Tên back_populates ở từng model liên quan phải khớp chính xác. Ví dụ SavingsGoal.user dùng back_populates="savings_goals", vì vậy User phải có thuộc tính savings_goals.
+
+MODEL Category — app/models/category.py
+
+    __tablename__ = "categories"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+
+autoincrement=True yêu cầu database cấp id kế tiếp.
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+
+user_id có thể rỗng do nullable=True. Nếu có user_id, nó phải tham chiếu users.id. ondelete="CASCADE" yêu cầu database xóa category nếu user tương ứng bị xóa. Lưu ý: Repository hiện truy vấn category theo user_id cụ thể, nên category có user_id NULL không tự động xuất hiện cho các user.
+
+    type = Column(String(20), nullable=False, index=True)
+
+Backend dùng giá trị income hoặc expense. Service giao dịch so loại category với loại transaction để ngăn chọn danh mục thu cho khoản chi và ngược lại.
+
+    __table_args__ = (UniqueConstraint("user_id", "name", "type", ...),)
+
+Đây là ràng buộc nhiều cột: trong cùng user, không thể có hai category trùng cả tên và loại. Cùng tên nhưng khác loại vẫn được phép. Một số database có cách xử lý NULL trong unique khác nhau; do user_id hiện nullable, ràng buộc này chủ yếu áp dụng rõ ràng cho category gắn user.
+
+    user = relationship("User", back_populates="categories")
+    transactions = relationship("Transaction", back_populates="category")
+
+Đây là hai đầu quan hệ. Category có một user và có thể được nhiều giao dịch dùng. Xóa category đặt Transaction.category_id thành NULL theo ForeignKey SET NULL, không xóa giao dịch.
+
+MODEL Transaction — app/models/transaction.py
+
+    user_id = Column(... ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+Mỗi giao dịch bắt buộc thuộc về một user. Xóa user sẽ xóa giao dịch theo ràng buộc cascade.
+
+    category_id = Column(... ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
+
+Danh mục không bắt buộc ở cấp model. Nếu danh mục bị xóa, giao dịch vẫn còn nhưng category_id thành NULL.
+
+    wallet_id = Column(... ForeignKey("wallets.id", ondelete="CASCADE"), nullable=False)
+
+Mỗi giao dịch gắn với ví. Backend service hiện tự tìm ví của user, tạo ví mặc định nếu chưa có, rồi đưa wallet.id vào khi tạo giao dịch.
+
+    amount = Column(Numeric(15, 2), nullable=False)
+
+Numeric phù hợp tiền hơn Float vì hạn chế sai số làm tròn nhị phân. 15 là tổng số chữ số tối đa, 2 chữ số sau dấu thập phân.
+
+    occurred_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), ...)
+
+Ngày giờ có timezone. lambda được gọi lúc tạo từng object để lấy thời điểm hiện tại UTC, thay vì tính một lần khi import file.
+
+relationship user/wallet/category là các thuộc tính object để truy cập, ví dụ transaction.user hoặc transaction.category. Chúng không phải dữ liệu độc lập; chúng dùng các khóa ngoại ở trên.
+
+MODEL Wallet — app/models/wallet.py
+
+    user_id = Column(... unique=True, nullable=False)
+
+unique=True đảm bảo mỗi user tối đa một wallet. Đây là ràng buộc ở database, không chỉ ở giao diện.
+
+    balance = Column(Numeric(15, 2), default=0.00, nullable=False)
+    currency = Column(String(10), default="VND", nullable=False)
+
+Số dư tiền và đơn vị tiền. Trong code hiện tại tiền được giả định VND ở nhiều nơi.
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+server_default=func.now() để database cấp thời điểm. onupdate=func.now() đặt thời điểm mới khi SQLAlchemy cập nhật row.
+
+    user = relationship("User", back_populates="wallet")
+    transactions = relationship("Transaction", back_populates="wallet", ...)
+
+wallet.user là chủ ví; wallet.transactions là các giao dịch liên quan.
+
+MODEL Budget — app/models/budget.py
+
+    amount_limit = Column(Numeric(15, 2), nullable=False)
+    month = Column(Integer, nullable=False)
+    year = Column(Integer, nullable=False)
+
+Ba trường này định nghĩa ngân sách tổng cho một tháng/năm, không phân chia theo category.
+
+    UniqueConstraint("user_id", "month", "year", ...)
+
+Ngăn tạo hai ngân sách cho cùng user cùng kỳ. Service cũng kiểm tra trước để trả lỗi nghiệp vụ, nhưng unique constraint vẫn cần để chống request đồng thời.
+
+MODEL SavingsGoal — app/models/savings_goal.py
+
+    target_amount = Column(Numeric(15, 2), nullable=False, default=0)
+    current_amount = Column(Numeric(15, 2), nullable=False, default=0)
+
+Target là số muốn đạt; current là tiền đã tích lũy. Đây là hai cột được lưu thật trong database.
+
+    deadline = Column(DateTime, nullable=True)
+    description = Column(Text, nullable=True)
+
+Hai thông tin tùy chọn. Text không giới hạn ngắn như String(n).
+
+    contributions = relationship("SavingsContribution", back_populates="savings_goal", cascade=...)
+
+Một mục tiêu có nhiều sự kiện nạp/rút. Xóa mục tiêu sẽ xóa lịch sử tương ứng.
+
+MODEL SavingsContribution — app/models/savings_contribution.py
+
+savings_goal_id là khóa ngoại bắt buộc tới savings_goals.id. amount là trị tuyệt đối của lần nạp/rút. type nói đây là DEPOSIT hay WITHDRAW. Service đồng thời cập nhật SavingsGoal.current_amount và thêm một contribution để lưu lịch sử.
+
+A3. Router: cách đọc decorator và tham số endpoint
+--------------------------------------------------
+Ví dụ từ app/routers/transactions.py:
+
+    router = APIRouter(prefix="/transactions", tags=["Transactions"])
+    @router.post("/", response_model=TransactionResponse, status_code=201)
+    def create_transaction(data: TransactionCreate, db: Session = Depends(get_db),
+                           current_user=Depends(get_current_user)):
+        return TransactionService(db).create_transaction(data, current_user.id)
+
+- APIRouter gom endpoint thành nhóm.
+- prefix cộng với đường dẫn trong decorator thành URL đầy đủ: POST /transactions/.
+- response_model yêu cầu FastAPI xác thực/định dạng kết quả bằng schema TransactionResponse.
+- status_code=201 báo tạo mới thành công.
+- data: TransactionCreate là body JSON đã qua Pydantic validation.
+- Depends(get_db) yêu cầu FastAPI mở database session và truyền vào.
+- Depends(get_current_user) bắt buộc JWT hợp lệ; user hiện tại được truyền vào.
+- Endpoint giữ vai trò điều phối; nghiệp vụ chính nằm trong service.
+
+Các router khác theo mẫu tương tự:
+- users: /users/ tạo user công khai; /users/me yêu cầu JWT.
+- auth: /auth/login nhận LoginRequest, không cần JWT.
+- categories: CRUD category, mọi endpoint đều nhận current_user.
+- wallets: /wallets/me lấy/sửa ví của chính user.
+- budgets: /budgets/ và /budgets/progress, nhận tháng/năm qua query string.
+- savings_goals: các đường dẫn /savings-goals/ và /savings-goals/{goal_id}/deposit, withdraw, history.
+- admin: các endpoint đặt Depends(require_admin), nên phải có token ADMIN.
+- dashboard, report, ai: lấy user từ JWT rồi chỉ truy vấn dữ liệu của người đó.
+
+A4. Schema: đọc luật xác thực dữ liệu
+-------------------------------------
+Ví dụ:
+
+    type: Literal["income", "expense"]
+    amount: Decimal = Field(gt=0, max_digits=15, decimal_places=2)
+
+Literal chỉ chấp nhận đúng hai chuỗi. Field(gt=0) yêu cầu amount lớn hơn 0. Decimal giữ độ chính xác số tiền. Nếu dữ liệu không hợp lệ, FastAPI thường trả HTTP 422 trước khi gọi service.
+
+    occurred_at: datetime
+
+Không có default trong schema nghĩa là client phải gửi ngày giờ, dù model SQLAlchemy có default. Validation schema diễn ra trước khi insert.
+
+    model_config = ConfigDict(from_attributes=True)
+
+Cho phép Pydantic lấy dữ liệu response trực tiếp từ object SQLAlchemy theo thuộc tính. Các response SavingsGoal có thêm trường tính toán nên service phải trả dictionary đã có đủ trường, không thể chỉ trả model thô.
+
+    model_dump(exclude_unset=True)
+
+Chuyển schema thành dict và chỉ giữ trường client thật sự gửi. Điều này quan trọng với PATCH: không gửi username thì không ghi đè username hiện tại bằng None.
+
+A5. Service: giải thích các nghiệp vụ chính
+-------------------------------------------
+AuthService.login:
+1. repository.get_by_email(data.email) tìm user.
+2. Không có user -> HTTP 401.
+3. verify_password(data.password, user.password_hash) so hash.
+4. create_access_token(user.id) tạo JWT.
+5. Trả token cùng thông tin user. Router có response_model TokenRespone, và schema đó chỉ khai báo access_token/token_type; vì vậy FastAPI không bảo đảm giữ lại field user trong JSON response.
+
+UserService.create_user:
+1. Tìm email hoặc username đã tồn tại.
+2. Nếu trùng, raise HTTPException 409 Conflict.
+3. hash_password(data.password), không lưu password gốc.
+4. Tạo User role USER.
+5. Repository add/commit/refresh rồi trả object vừa tạo.
+
+CategoryService.create_category:
+1. strip() bỏ khoảng trắng đầu/cuối tên.
+2. Tìm category trùng theo name + type + user.
+3. model_dump(exclude_none=True) chuyển dữ liệu hợp lệ thành dict.
+4. Ghi đè name bằng phiên bản đã strip.
+5. Dùng Category(user_id=user_id, **values). Dấu ** đưa từng cặp key/value trong dict thành đối số constructor.
+6. Repository lưu và trả category.
+
+TransactionService._validate_category:
+- category_id None thì cho qua.
+- Tìm category theo cả id và user_id để không chọn category của người khác.
+- Không có thì 400.
+- category.type khác transaction_type thì 400.
+
+TransactionService.create_transaction:
+1. Gọi kiểm tra category.
+2. Tìm ví của user; nếu chưa có, repository tạo ví mặc định.
+3. data.model_dump() tạo dict các trường giao dịch.
+4. Transaction(user_id=..., wallet_id=..., **tx_data) tạo model; user_id và wallet_id được service thêm vì client không quyết định chủ giao dịch/ví.
+5. Repository commit giao dịch.
+6. Thu nhập cộng vào wallet.balance, chi tiêu trừ khỏi số dư; commit lần nữa.
+
+Lưu ý đọc code: update_transaction hiện cập nhật transaction row nhưng không tính lại balance theo chênh lệch cũ/mới. Nếu sửa amount hoặc type, số dư ví có thể lệch. Delete thì service hoàn lại tác động giao dịch lên balance trước khi repository xóa row.
+
+CategoryService.update_category:
+- get_category xác nhận category thuộc user.
+- model_dump(exclude_unset=True) chỉ lấy trường gửi trong PATCH.
+- Nếu có name thì trim.
+- Tính tên/type sau cập nhật để dò trùng.
+- setattr(category, field, value) áp dụng từng trường đã gửi.
+- save commit và refresh.
+
+WalletService.get_user_wallet:
+- tìm ví theo user id.
+- nếu không thấy thì tạo ví mặc định.
+- WalletResponse.model_validate(wallet) chuyển ORM object thành schema response.
+
+WalletService.update_wallet_info:
+- tìm đúng ví của user, không có thì 404.
+- cập nhật name và/hoặc balance nếu request gửi giá trị.
+- commit, refresh rồi trả WalletResponse.
+- Vì WalletUpdate cho phép balance, đây là cập nhật số dư trực tiếp; nó không ghi SavingsContribution hoặc Transaction.
+
+BudgetService.get_monthly_budget_progress:
+1. Tìm budget theo user/month/year; không có trả None.
+2. SQL sum(Transaction.amount) lọc giao dịch của user, loại expense và tháng/năm theo occurred_at.
+3. coalesce(sum, 0) biến kết quả rỗng thành 0.
+4. remaining = limit - spent.
+5. ratio = spent / limit * 100; nếu limit bằng 0 thì 0 để tránh chia cho 0.
+6. Gán trạng thái RED_OVERBUDGET từ 100%, YELLOW_WARNING từ 80%, còn lại NORMAL.
+7. Tạo BudgetProgressResponse.
+
+SavingsGoalService._format_goal:
+- Chuyển target/current thành Decimal.
+- remaining = max(target-current, 0): không cho “còn thiếu” âm nếu đã vượt mục tiêu.
+- progress = current/target * 100 nếu target > 0, nếu không thì 0.
+- Trả dict chứa các cột model và hai giá trị phái sinh remaining_amount/progress.
+- create_goal lưu xong rồi gọi _format_goal; việc này bảo đảm response có trường mà SavingsGoalResponse yêu cầu.
+
+SavingsGoalService.add_money:
+1. Tìm goal theo cả goal_id và user_id.
+2. Nếu không có trả lỗi nghiệp vụ.
+3. Cộng amount vào current_amount.
+4. Thêm SavingsContribution type DEPOSIT.
+5. repository.update commit các thay đổi.
+6. Trả goal đã format.
+
+withdraw_money làm tương tự nhưng trước hết chặn amount lớn hơn current_amount; sau đó trừ current_amount và lưu type WITHDRAW.
+
+A6. Repository: giải thích các thao tác database
+------------------------------------------------
+Ví dụ repository.create:
+
+    self.db.add(item)
+    self.db.commit()
+    self.db.refresh(item)
+    return item
+
+- add(item): đưa object vào session; lúc này chưa chắc đã ghi xuống database.
+- commit(): gửi transaction database và xác nhận lưu.
+- refresh(item): đọc lại row để lấy id/default/server-generated fields.
+- return item: service nhận object đã được lưu.
+
+query(Model).filter(...).first() trả dòng đầu tiên hoặc None. all() trả danh sách. order_by() sắp xếp, offset()/limit() phân trang. SQLAlchemy expression như User.id == user_id được chuyển thành điều kiện SQL, không phải so sánh Python.
+
+A7. Tính toán dashboard và báo cáo
+----------------------------------
+DashboardRepository dùng func.sum/count và group_by:
+- SUM amount theo income/expense.
+- COUNT id đếm giao dịch.
+- JOIN Category với Transaction để cộng tiền theo danh mục.
+- extract(year/month, occurred_at) nhóm theo kỳ tháng.
+- outerjoin ở recent transactions giữ giao dịch kể cả khi không còn category.
+DashboardService chuyển các tuple kết quả query thành dict dễ trả cho schema.
+
+analytics_service.generate_monthly_report:
+- Lọc Transaction theo user, tháng, năm.
+- Tính tổng income và expense; coalesce bảo đảm tháng không có dòng vẫn được 0.
+- net_savings = income - expense.
+- savings_rate = net_savings/income*100 nếu income dương.
+- JOIN danh mục để xếp top 3 category chi tiêu.
+- needs_ratio và wants_ratio hiện gán các tỷ lệ quy ước 50/30, không suy ra từ dữ liệu chi tiết.
+
+A8. Client và service AI
+------------------------
+app/clients/ai_client.py là lớp gọi Google Generative AI SDK; API key/model được cấu hình ở client. ai_service.py:
+1. Serialize summary bằng model_dump_json().
+2. Ghép dữ liệu vào prompt yêu cầu AI trả JSON theo schema.
+3. Bỏ dấu code fence nếu model bọc JSON trong markdown.
+4. json.loads parse chuỗi.
+5. AIReportResponse(**parsed_data) validate kết quả.
+6. Nếu bất kỳ bước nào exception, trả báo cáo mẫu với is_mock=True.
+
+Do catch Exception rộng, API AI có thể vẫn trả HTTP 200 với dữ liệu mẫu. Cần nhìn is_mock để biết kết quả có phải từ AI thật hay không.
+
+A9. Ví dụ request-to-database đầy đủ: POST /savings-goals/
+------------------------------------------------------------
+1. FastAPI tìm route create_savings_goal trong savings_goals.py.
+2. Depends(get_current_user) xác minh bearer token, lấy User hiện tại.
+3. JSON body được parse thành SavingsGoalCreate; sai/thiếu trường sẽ bị 422.
+4. Router gọi SavingsGoalService(db).create_goal(current_user.id, data).
+5. Service tạo SavingsGoal gắn user_id từ JWT, không tin user_id do client gửi.
+6. Repository add/commit/refresh lưu xuống bảng savings_goals.
+7. Service _format_goal tính remaining_amount/progress.
+8. FastAPI xác thực kết quả với SavingsGoalResponse và trả JSON 200.
+
+Điểm quan trọng: nếu bước 6 commit thành công nhưng bước 7/8 lỗi, row có thể đã nằm trong database dù client nhận lỗi. Vì vậy khi thấy lỗi sau thao tác tạo, cần kiểm tra danh sách/database trước khi gửi lại để tránh tạo trùng.
+
+A10. Mã lỗi HTTP hay gặp
+------------------------
+- 401 Unauthorized: thiếu/sai/hết hạn JWT hoặc đăng nhập sai.
+- 403 Forbidden: đã đăng nhập nhưng không có quyền admin.
+- 404 Not Found: không tìm thấy tài nguyên thuộc user hiện tại.
+- 409 Conflict: email/username/danh mục trùng.
+- 400 Bad Request: vi phạm quy tắc nghiệp vụ, ví dụ category không khớp loại giao dịch.
+- 422 Unprocessable Entity: JSON/query không đúng schema hoặc thiếu trường bắt buộc.
+- 500 Internal Server Error: lỗi chưa được xử lý, ví dụ response_model thiếu dữ liệu hoặc lỗi database.
+
+Khi debug endpoint, kiểm tra lần lượt: URL/method -> status code -> detail response -> schema input -> service -> repository/database -> response_model.

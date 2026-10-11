@@ -64,6 +64,7 @@ export default function Dashboard() {
     type: "expense",
     category_id: "",
     note: "",
+    occurred_at: new Date().toISOString().slice(0, 16),
   });
   const [catForm, setCatForm] = useState({
     name: "",
@@ -109,14 +110,15 @@ export default function Dashboard() {
       setRecentTransactions(recents || []);
       setCategoriesList(cats || []);
       if (cats?.length > 0 && !txForm.category_id) {
-        setTxForm((prev) => ({ ...prev, category_id: cats[0].id }));
+        const matched = cats.find((c) => c.type === txForm.type);
+        setTxForm((prev) => ({ ...prev, category_id: matched ? matched.id : "" }));
       }
     } catch (err) {
       console.error("Lỗi khi tải dữ liệu dashboard:", err);
     } finally {
       setLoading(false);
     }
-  }, [txForm.category_id]);
+  }, [txForm.category_id, txForm.type]);
 
   useEffect(() => {
     loadData();
@@ -126,11 +128,25 @@ export default function Dashboard() {
     return () => window.removeEventListener("transaction-updated", handleUpdate);
   }, [loadData]);
 
+  // Xử lý khi đổi loại giao dịch
+  const handleTypeChange = (newType) => {
+    const matched = categoriesList.find((c) => c.type === newType);
+    setTxForm((prev) => ({
+      ...prev,
+      type: newType,
+      category_id: matched ? matched.id : "",
+    }));
+  };
+
   // Thêm giao dịch
   const handleAddTransaction = async (e) => {
     e.preventDefault();
-    if (!txForm.amount || !txForm.category_id) {
-      alert("Vui lòng nhập đầy đủ thông tin");
+    if (!txForm.amount) {
+      alert("Vui lòng nhập số tiền!");
+      return;
+    }
+    if (!txForm.category_id) {
+      alert("Vui lòng chọn danh mục phù hợp trước khi gửi!");
       return;
     }
 
@@ -141,14 +157,19 @@ export default function Dashboard() {
         type: txForm.type,
         category_id: parseInt(txForm.category_id),
         note: txForm.note,
+        occurred_at: txForm.occurred_at
+          ? new Date(txForm.occurred_at).toISOString()
+          : new Date().toISOString(),
       });
 
       setShowTxModal(false);
+      const defaultMatched = categoriesList.find((c) => c.type === "expense");
       setTxForm({
         amount: "",
         type: "expense",
-        category_id: categoriesList[0]?.id || "",
+        category_id: defaultMatched ? defaultMatched.id : "",
         note: "",
+        occurred_at: new Date().toISOString().slice(0, 16),
       });
       loadData();
     } catch (err) {
@@ -373,7 +394,11 @@ export default function Dashboard() {
                             {isIncome ? <ArrowDownLeft className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
                           </div>
                           <div>
-                            <p className="text-xs font-bold text-slate-800">{tx.category_name || "Giao dịch"}</p>
+                            <p className="text-xs font-bold text-slate-800">
+                              {tx.category_name ||
+                                categoriesList.find((c) => c.id === tx.category_id)?.name ||
+                                "Chưa phân loại"}
+                            </p>
                             <p className="text-[10px] text-slate-400 truncate max-w-[120px]">
                               {tx.note || new Date(tx.occurred_at).toLocaleDateString("vi-VN")}
                             </p>
@@ -443,7 +468,7 @@ export default function Dashboard() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setTxForm({ ...txForm, type: "expense" })}
+                    onClick={() => handleTypeChange("expense")}
                     className={`py-2 text-xs font-bold rounded-xl border transition ${
                       txForm.type === "expense"
                         ? "bg-rose-50 border-rose-500 text-rose-600"
@@ -454,7 +479,7 @@ export default function Dashboard() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setTxForm({ ...txForm, type: "income" })}
+                    onClick={() => handleTypeChange("income")}
                     className={`py-2 text-xs font-bold rounded-xl border transition ${
                       txForm.type === "income"
                         ? "bg-emerald-50 border-emerald-500 text-emerald-600"
@@ -483,8 +508,12 @@ export default function Dashboard() {
                 <select
                   value={txForm.category_id}
                   onChange={(e) => setTxForm({ ...txForm, category_id: e.target.value })}
+                  required
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
                 >
+                  {!txForm.category_id && (
+                    <option value="">-- Chọn danh mục --</option>
+                  )}
                   {categoriesList
                     .filter((c) => c.type === txForm.type)
                     .map((cat) => (
@@ -492,7 +521,23 @@ export default function Dashboard() {
                         {cat.name}
                       </option>
                     ))}
+                  {categoriesList.filter((c) => c.type === txForm.type).length === 0 && (
+                    <option value="" disabled>
+                      Chưa có danh mục loại này
+                    </option>
+                  )}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Thời gian</label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={txForm.occurred_at}
+                  onChange={(e) => setTxForm({ ...txForm, occurred_at: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 font-semibold"
+                />
               </div>
 
               <div>

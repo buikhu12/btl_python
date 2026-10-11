@@ -35,6 +35,7 @@ export default function Layout({ children }) {
     type: "expense",
     category_id: "",
     note: "",
+    occurred_at: new Date().toISOString().slice(0, 16),
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -50,7 +51,8 @@ export default function Layout({ children }) {
       const data = await getCategories();
       setCategories(data);
       if (data.length > 0 && !txForm.category_id) {
-        setTxForm((prev) => ({ ...prev, category_id: data[0].id }));
+        const matched = data.find((c) => c.type === txForm.type);
+        setTxForm((prev) => ({ ...prev, category_id: matched ? matched.id : "" }));
       }
     } catch (err) {
       console.warn("Could not load categories:", err);
@@ -59,10 +61,23 @@ export default function Layout({ children }) {
     }
   };
 
+  const handleTypeChange = (newType) => {
+    const matched = categories.find((c) => c.type === newType);
+    setTxForm((prev) => ({
+      ...prev,
+      type: newType,
+      category_id: matched ? matched.id : "",
+    }));
+  };
+
   const handleQuickSubmit = async (e) => {
     e.preventDefault();
-    if (!txForm.amount || !txForm.category_id) {
-      alert("Vui lòng nhập đầy đủ thông tin");
+    if (!txForm.amount) {
+      alert("Vui lòng nhập số tiền!");
+      return;
+    }
+    if (!txForm.category_id) {
+      alert("Vui lòng chọn danh mục phù hợp trước khi gửi!");
       return;
     }
 
@@ -73,14 +88,19 @@ export default function Layout({ children }) {
         type: txForm.type,
         category_id: parseInt(txForm.category_id),
         note: txForm.note || "",
+        occurred_at: txForm.occurred_at
+          ? new Date(txForm.occurred_at).toISOString()
+          : new Date().toISOString(),
       });
 
       setShowQuickModal(false);
+      const defaultMatched = categories.find((c) => c.type === "expense");
       setTxForm({
         amount: "",
         type: "expense",
-        category_id: categories[0]?.id || "",
+        category_id: defaultMatched ? defaultMatched.id : "",
         note: "",
+        occurred_at: new Date().toISOString().slice(0, 16),
       });
       // Bắn event để các trang đang hiển thị reload dữ liệu
       window.dispatchEvent(new Event("transaction-updated"));
@@ -278,7 +298,7 @@ export default function Layout({ children }) {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setTxForm({ ...txForm, type: "expense" })}
+                    onClick={() => handleTypeChange("expense")}
                     className={`py-2 text-xs font-bold rounded-xl border transition ${
                       txForm.type === "expense"
                         ? "bg-rose-50 border-rose-500 text-rose-600"
@@ -289,7 +309,7 @@ export default function Layout({ children }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setTxForm({ ...txForm, type: "income" })}
+                    onClick={() => handleTypeChange("income")}
                     className={`py-2 text-xs font-bold rounded-xl border transition ${
                       txForm.type === "income"
                         ? "bg-emerald-50 border-emerald-500 text-emerald-600"
@@ -321,8 +341,12 @@ export default function Layout({ children }) {
                   <select
                     value={txForm.category_id}
                     onChange={(e) => setTxForm({ ...txForm, category_id: e.target.value })}
+                    required
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
                   >
+                    {!txForm.category_id && (
+                      <option value="">-- Chọn danh mục --</option>
+                    )}
                     {categories
                       .filter((c) => c.type === txForm.type)
                       .map((cat) => (
@@ -337,6 +361,17 @@ export default function Layout({ children }) {
                     )}
                   </select>
                 )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Thời gian</label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={txForm.occurred_at}
+                  onChange={(e) => setTxForm({ ...txForm, occurred_at: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+                />
               </div>
 
               <div>
