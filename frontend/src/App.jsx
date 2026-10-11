@@ -103,6 +103,17 @@ function App() {
           />
 
           <Route
+            path="/ai"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <AIReports />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
             path="/profile"
             element={
               <ProtectedRoute>

@@ -17,7 +17,9 @@ import {
   createTransaction,
   updateTransaction,
   deleteTransaction,
-  getCategories
+  getCategories,
+  createCategory,
+  seedDefaultCategories
 } from "../services/api";
 
 export default function Transactions() {
@@ -41,6 +43,11 @@ export default function Transactions() {
     occurred_at: new Date().toISOString().slice(0, 16),
   });
   const [formSubmitting, setFormSubmitting] = useState(false);
+
+  // Quick category creation inside modal
+  const [showQuickAddCat, setShowQuickAddCat] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [catActionLoading, setCatActionLoading] = useState(false);
 
   const formatVND = (val) => {
     return new Intl.NumberFormat("vi-VN").format(Number(val) || 0) + " đ";
@@ -71,6 +78,20 @@ export default function Transactions() {
     loadData();
   }, [loadData]);
 
+  // Lắng nghe sự kiện cập nhật danh mục từ các trang hoặc modal khác
+  useEffect(() => {
+    const handleCategoriesUpdated = async () => {
+      try {
+        const cats = await getCategories();
+        setCategories(cats || []);
+      } catch (err) {
+        console.error("Lỗi đồng bộ danh mục:", err);
+      }
+    };
+    window.addEventListener("categories-updated", handleCategoriesUpdated);
+    return () => window.removeEventListener("categories-updated", handleCategoriesUpdated);
+  }, []);
+
   // Tra cứu category_name từ categories khi backend không trả trường này
   const categoryMap = useMemo(() => {
     const map = {};
@@ -84,15 +105,27 @@ export default function Transactions() {
     return tx.category_name || categoryMap[tx.category_id] || "Chưa phân loại";
   };
 
-  const handleOpenCreate = () => {
+  const handleOpenCreate = async () => {
     setEditingTx(null);
+    let cats = categories;
+    if (!cats || cats.length === 0) {
+      try {
+        cats = await getCategories();
+        setCategories(cats || []);
+      } catch (err) {
+        console.error("Lỗi tải danh mục:", err);
+      }
+    }
+    const matched = (cats || []).find((c) => c.type === "expense");
     setFormData({
       amount: "",
       type: "expense",
-      category_id: categories.find((c) => c.type === "expense")?.id || categories[0]?.id || "",
+      category_id: matched ? matched.id : cats?.[0]?.id || "",
       note: "",
       occurred_at: new Date().toISOString().slice(0, 16),
     });
+    setShowQuickAddCat(false);
+    setNewCatName("");
     setShowModal(true);
   };
 
@@ -107,6 +140,8 @@ export default function Transactions() {
         ? new Date(tx.occurred_at).toISOString().slice(0, 16)
         : new Date().toISOString().slice(0, 16),
     });
+    setShowQuickAddCat(false);
+    setNewCatName("");
     setShowModal(true);
   };
 
@@ -117,6 +152,47 @@ export default function Transactions() {
       type: newType,
       category_id: matched ? matched.id : "",
     }));
+  };
+
+  const handleQuickCreateCategory = async (e) => {
+    if (e) e.preventDefault();
+    if (!newCatName.trim()) {
+      alert("Vui lòng nhập tên danh mục!");
+      return;
+    }
+    try {
+      setCatActionLoading(true);
+      const created = await createCategory({
+        name: newCatName.trim(),
+        type: formData.type,
+      });
+      const updatedCats = [...categories, created];
+      setCategories(updatedCats);
+      setFormData((prev) => ({ ...prev, category_id: created.id }));
+      setNewCatName("");
+      setShowQuickAddCat(false);
+      window.dispatchEvent(new Event("categories-updated"));
+    } catch (err) {
+      alert(err.response?.data?.detail || "Không thể tạo danh mục mới!");
+    } finally {
+      setCatActionLoading(false);
+    }
+  };
+
+  const handleSeedCategories = async () => {
+    try {
+      setCatActionLoading(true);
+      const seeded = await seedDefaultCategories();
+      setCategories(seeded || []);
+      const matched = (seeded || []).find((c) => c.type === formData.type);
+      if (matched) {
+        setFormData((prev) => ({ ...prev, category_id: matched.id }));
+      }
+    } catch (err) {
+      alert("Không thể khởi tạo danh mục mẫu!");
+    } finally {
+      setCatActionLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -419,12 +495,49 @@ export default function Transactions() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">Danh mục</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-600">Danh mục</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickAddCat(!showQuickAddCat)}
+                    className="text-[11px] font-bold text-purple-600 hover:text-purple-700 hover:underline flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{showQuickAddCat ? "Đóng tạo nhanh" : "+ Thêm nhanh danh mục"}</span>
+                  </button>
+                </div>
+
+                {/* Khung tạo nhanh danh mục ngay trong modal */}
+                {showQuickAddCat && (
+                  <div className="mb-2.5 p-3 bg-purple-50/80 border border-purple-200/80 rounded-xl space-y-2">
+                    <p className="text-[11px] text-purple-700 font-semibold">
+                      Tạo danh mục mới cho khoản <span className="font-bold underline">{formData.type === "expense" ? "Chi tiêu" : "Thu nhập"}</span>:
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="VD: Cà phê, Tiền điện, Thưởng..."
+                        value={newCatName}
+                        onChange={(e) => setNewCatName(e.target.value)}
+                        className="flex-1 px-3 py-1.5 bg-white border border-purple-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 font-medium"
+                      />
+                      <button
+                        type="button"
+                        disabled={catActionLoading || !newCatName.trim()}
+                        onClick={handleQuickCreateCategory}
+                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm transition whitespace-nowrap"
+                      >
+                        {catActionLoading ? "Đang tạo..." : "Lưu & Chọn"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <select
                   value={formData.category_id}
                   onChange={(e) => setFormData({ ...formData, category_id: e.target.value })}
                   required
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 font-medium"
                 >
                   {!formData.category_id && (
                     <option value="">-- Chọn danh mục --</option>
@@ -442,6 +555,22 @@ export default function Transactions() {
                     </option>
                   )}
                 </select>
+
+                {categories.filter((c) => c.type === formData.type).length === 0 && (
+                  <div className="mt-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-amber-700 font-medium">
+                      Chưa có danh mục {formData.type === "expense" ? "chi tiêu" : "thu nhập"}.
+                    </span>
+                    <button
+                      type="button"
+                      disabled={catActionLoading}
+                      onClick={handleSeedCategories}
+                      className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg transition whitespace-nowrap shadow-sm"
+                    >
+                      {catActionLoading ? "Đang nạp..." : "Tạo danh mục mẫu"}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div>

@@ -17,7 +17,7 @@ import {
   PieChart,
   Menu
 } from "lucide-react";
-import { getCategories, createTransaction } from "../services/api";
+import { getCategories, createTransaction, createCategory, seedDefaultCategories } from "../services/api";
 
 export default function Layout({ children }) {
   const { user, logoutUser } = useAuth();
@@ -28,6 +28,11 @@ export default function Layout({ children }) {
   const [showQuickModal, setShowQuickModal] = useState(false);
   const [categories, setCategories] = useState([]);
   const [loadingCats, setLoadingCats] = useState(false);
+
+  // Quick category creation inside modal
+  const [showQuickAddCat, setShowQuickAddCat] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [catActionLoading, setCatActionLoading] = useState(false);
 
   // Form states cho Modal thêm nhanh giao dịch
   const [txForm, setTxForm] = useState({
@@ -45,12 +50,25 @@ export default function Layout({ children }) {
     }
   }, [showQuickModal]);
 
+  useEffect(() => {
+    const handleCategoriesUpdated = async () => {
+      try {
+        const data = await getCategories();
+        setCategories(data || []);
+      } catch (err) {
+        console.warn("Could not reload categories:", err);
+      }
+    };
+    window.addEventListener("categories-updated", handleCategoriesUpdated);
+    return () => window.removeEventListener("categories-updated", handleCategoriesUpdated);
+  }, []);
+
   const loadCategories = async () => {
     try {
       setLoadingCats(true);
       const data = await getCategories();
-      setCategories(data);
-      if (data.length > 0 && !txForm.category_id) {
+      setCategories(data || []);
+      if (data && data.length > 0 && !txForm.category_id) {
         const matched = data.find((c) => c.type === txForm.type);
         setTxForm((prev) => ({ ...prev, category_id: matched ? matched.id : "" }));
       }
@@ -68,6 +86,47 @@ export default function Layout({ children }) {
       type: newType,
       category_id: matched ? matched.id : "",
     }));
+  };
+
+  const handleQuickCreateCategory = async (e) => {
+    if (e) e.preventDefault();
+    if (!newCatName.trim()) {
+      alert("Vui lòng nhập tên danh mục!");
+      return;
+    }
+    try {
+      setCatActionLoading(true);
+      const created = await createCategory({
+        name: newCatName.trim(),
+        type: txForm.type,
+      });
+      const updatedCats = [...categories, created];
+      setCategories(updatedCats);
+      setTxForm((prev) => ({ ...prev, category_id: created.id }));
+      setNewCatName("");
+      setShowQuickAddCat(false);
+      window.dispatchEvent(new Event("categories-updated"));
+    } catch (err) {
+      alert(err.response?.data?.detail || "Không thể tạo danh mục mới!");
+    } finally {
+      setCatActionLoading(false);
+    }
+  };
+
+  const handleSeedCategories = async () => {
+    try {
+      setCatActionLoading(true);
+      const seeded = await seedDefaultCategories();
+      setCategories(seeded || []);
+      const matched = (seeded || []).find((c) => c.type === txForm.type);
+      if (matched) {
+        setTxForm((prev) => ({ ...prev, category_id: matched.id }));
+      }
+    } catch (err) {
+      alert("Không thể khởi tạo danh mục mẫu!");
+    } finally {
+      setCatActionLoading(false);
+    }
   };
 
   const handleQuickSubmit = async (e) => {
@@ -160,6 +219,8 @@ export default function Layout({ children }) {
               const isActive =
                 item.path === "/"
                   ? location.pathname === "/"
+                  : item.path === "/reports"
+                  ? location.pathname.startsWith("/reports") || location.pathname.startsWith("/ai")
                   : location.pathname.startsWith(item.path);
 
               return (
@@ -334,7 +395,44 @@ export default function Layout({ children }) {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1">Danh mục</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-600">Danh mục</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickAddCat(!showQuickAddCat)}
+                    className="text-[11px] font-bold text-purple-600 hover:text-purple-700 hover:underline flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{showQuickAddCat ? "Đóng tạo nhanh" : "+ Thêm nhanh danh mục"}</span>
+                  </button>
+                </div>
+
+                {/* Khung tạo nhanh danh mục ngay trong modal */}
+                {showQuickAddCat && (
+                  <div className="mb-2.5 p-3 bg-purple-50/80 border border-purple-200/80 rounded-xl space-y-2">
+                    <p className="text-[11px] text-purple-700 font-semibold">
+                      Tạo danh mục mới cho khoản <span className="font-bold underline">{txForm.type === "expense" ? "Chi tiêu" : "Thu nhập"}</span>:
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="VD: Cà phê, Tiền điện, Thưởng..."
+                        value={newCatName}
+                        onChange={(e) => setNewCatName(e.target.value)}
+                        className="flex-1 px-3 py-1.5 bg-white border border-purple-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 font-medium"
+                      />
+                      <button
+                        type="button"
+                        disabled={catActionLoading || !newCatName.trim()}
+                        onClick={handleQuickCreateCategory}
+                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm transition whitespace-nowrap"
+                      >
+                        {catActionLoading ? "Đang tạo..." : "Lưu & Chọn"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {loadingCats ? (
                   <div className="text-xs text-slate-400 py-2">Đang tải danh mục...</div>
                 ) : (
@@ -342,7 +440,7 @@ export default function Layout({ children }) {
                     value={txForm.category_id}
                     onChange={(e) => setTxForm({ ...txForm, category_id: e.target.value })}
                     required
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 font-medium"
                   >
                     {!txForm.category_id && (
                       <option value="">-- Chọn danh mục --</option>
@@ -360,6 +458,22 @@ export default function Layout({ children }) {
                       </option>
                     )}
                   </select>
+                )}
+
+                {categories.filter((c) => c.type === txForm.type).length === 0 && !loadingCats && (
+                  <div className="mt-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-amber-700 font-medium">
+                      Chưa có danh mục {txForm.type === "expense" ? "chi tiêu" : "thu nhập"}.
+                    </span>
+                    <button
+                      type="button"
+                      disabled={catActionLoading}
+                      onClick={handleSeedCategories}
+                      className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg transition whitespace-nowrap shadow-sm"
+                    >
+                      {catActionLoading ? "Đang nạp..." : "Tạo danh mục mẫu"}
+                    </button>
+                  </div>
                 )}
               </div>
 

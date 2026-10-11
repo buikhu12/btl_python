@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { FolderKanban, Plus, Trash2, Edit2, RotateCw, X, Tag } from "lucide-react";
-import { getCategories, createCategory, deleteCategory } from "../services/api";
+import { FolderKanban, Plus, Trash2, Edit2, RotateCw, X, Tag, Sparkles } from "lucide-react";
+import { getCategories, createCategory, deleteCategory, seedDefaultCategories } from "../services/api";
 
 export default function Categories() {
   const [categories, setCategories] = useState([]);
@@ -14,6 +14,7 @@ export default function Categories() {
     type: "expense",
   });
   const [submitting, setSubmitting] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   const loadCategories = async () => {
     setLoading(true);
@@ -31,6 +32,14 @@ export default function Categories() {
     loadCategories();
   }, []);
 
+  useEffect(() => {
+    const handleCategoriesUpdated = () => {
+      loadCategories();
+    };
+    window.addEventListener("categories-updated", handleCategoriesUpdated);
+    return () => window.removeEventListener("categories-updated", handleCategoriesUpdated);
+  }, []);
+
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) return;
@@ -44,6 +53,7 @@ export default function Categories() {
 
       setShowModal(false);
       setFormData({ name: "", type: "expense" });
+      window.dispatchEvent(new Event("categories-updated"));
       loadCategories();
     } catch (err) {
       alert(err.response?.data?.detail || "Không thể tạo danh mục!");
@@ -57,9 +67,22 @@ export default function Categories() {
 
     try {
       await deleteCategory(id);
+      window.dispatchEvent(new Event("categories-updated"));
       loadCategories();
     } catch (err) {
       alert(err.response?.data?.detail || "Không thể xóa danh mục này (có thể đang có giao dịch liên kết).");
+    }
+  };
+
+  const handleSeed = async () => {
+    setSeeding(true);
+    try {
+      const data = await seedDefaultCategories();
+      setCategories(data || []);
+    } catch (err) {
+      alert("Không thể khởi tạo danh mục mẫu!");
+    } finally {
+      setSeeding(false);
     }
   };
 
@@ -81,6 +104,16 @@ export default function Categories() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleSeed}
+            disabled={seeding}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 transition shadow-sm border border-purple-200/60"
+            title="Tạo các danh mục chuẩn (Ăn uống, Mua sắm, Lương...)"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{seeding ? "Đang tạo..." : "Khởi tạo mẫu"}</span>
+          </button>
+
           <button
             onClick={() => {
               setFormData({ name: "", type: activeTab === "income" ? "income" : "expense" });
@@ -174,8 +207,27 @@ export default function Categories() {
         </div>
 
         {filtered.length === 0 && !loading && (
-          <div className="bg-white p-12 rounded-3xl border border-slate-200/70 text-center text-slate-400 text-xs">
-            Chưa có danh mục nào thuộc nhóm này. Hãy thêm danh mục mới!
+          <div className="bg-white p-12 rounded-3xl border border-slate-200/70 text-center flex flex-col items-center justify-center space-y-3">
+            <p className="text-slate-400 text-xs">Chưa có danh mục nào thuộc nhóm này.</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSeed}
+                disabled={seeding}
+                className="px-4 py-2 bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-bold rounded-xl transition border border-purple-200/60 flex items-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{seeding ? "Đang tạo..." : "Khởi tạo danh mục mẫu"}</span>
+              </button>
+              <button
+                onClick={() => {
+                  setFormData({ name: "", type: activeTab === "income" ? "income" : "expense" });
+                  setShowModal(true);
+                }}
+                className="px-4 py-2 bg-[#7a4bf6] text-white hover:bg-[#6838eb] text-xs font-bold rounded-xl transition"
+              >
+                + Thêm danh mục mới
+              </button>
+            </div>
           </div>
         )}
       </div>

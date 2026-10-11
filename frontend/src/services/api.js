@@ -112,10 +112,67 @@ export const deleteTransaction = async (id) => {
 };
 
 // --- CATEGORIES APIS ---
+export const DEFAULT_CATEGORIES = [
+  { name: "Ăn uống", type: "expense" },
+  { name: "Mua sắm", type: "expense" },
+  { name: "Di chuyển", type: "expense" },
+  { name: "Hóa đơn & Tiện ích", type: "expense" },
+  { name: "Giải trí", type: "expense" },
+  { name: "Sức khỏe", type: "expense" },
+  { name: "Tiền lương", type: "income" },
+  { name: "Tiền thưởng", type: "income" },
+  { name: "Thu nhập phụ", type: "income" },
+  { name: "Đầu tư", type: "income" },
+];
+
+let isSeedingCategories = false;
+
+export const seedDefaultCategories = async () => {
+  try {
+    const res = await api.get("/categories/");
+    const existing = res.data || [];
+    const existingKeys = new Set(existing.map((c) => `${c.name.trim().toLowerCase()}_${c.type}`));
+
+    const toCreate = DEFAULT_CATEGORIES.filter(
+      (c) => !existingKeys.has(`${c.name.trim().toLowerCase()}_${c.type}`)
+    );
+
+    for (const cat of toCreate) {
+      try {
+        await api.post("/categories/", cat);
+      } catch (e) {
+        // ignore if already exists
+      }
+    }
+
+    const refreshed = await api.get("/categories/");
+    window.dispatchEvent(new Event("categories-updated"));
+    return refreshed.data || [];
+  } catch (err) {
+    console.error("Lỗi khi khởi tạo danh mục mẫu:", err);
+    return [];
+  }
+};
+
 export const getCategories = async (type = null) => {
   const params = type ? { type } : {};
   const res = await api.get("/categories/", { params });
-  return res.data;
+  let list = res.data || [];
+
+  // Nếu người dùng chưa có bất kỳ danh mục nào, tự động seed danh mục chuẩn
+  if (list.length === 0 && !isSeedingCategories) {
+    isSeedingCategories = true;
+    try {
+      const seeded = await seedDefaultCategories();
+      list = type ? seeded.filter((c) => c.type === type) : seeded;
+    } catch (e) {
+      console.warn("Không thể auto-seed danh mục:", e);
+    } finally {
+      isSeedingCategories = false;
+    }
+  }
+
+  return list;
 };
 
 export const createCategory = async (data) => {
@@ -183,13 +240,13 @@ export const getMonthlyReport = async (month, year) => {
   return res.data;
 };
 
-export const getAIAnalysis = async (month, year) => {
-  const params = {};
-  if (month) params.month = month;
-  if (year) params.year = year;
-  const res = await api.get("/ai/financial-analysis", { params });
+export const getAIAnalysis = async () => {
+  // Phân tích báo cáo tài chính bằng AI trong 180 ngày gần nhất
+  const res = await api.post("/ai/analyze-report");
   return res.data;
 };
+
+export const analyzeFinancialReport = getAIAnalysis;
 
 // --- WALLETS APIS ---
 export const getMyWallet = async () => {

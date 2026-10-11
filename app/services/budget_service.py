@@ -31,10 +31,14 @@ class BudgetService:
         if not wallet:
             wallet = self.wallet_repo.create_default_wallet(user_id=user_id)
         current_wallet_balance = wallet.balance if wallet else Decimal("0.00")
-
+        if dto.amount_limit>wallet.balance:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f'Ngân sách không đủ'
+            )
+        
         # 3. Tạo ngân sách mới
         created_budget = self.repo.create(dto, user_id)
-
         # 4. Trả về tiến độ hiện tại (lúc mới tạo)
         return self.get_monthly_budget_progress(user_id, created_budget.month, created_budget.year)
 
@@ -46,6 +50,15 @@ class BudgetService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Chưa thiết lập ngân sách cho tháng {month}/{year}."
             )
+        wallet = self.wallet_repo.get_by_user_id(user_id)
+        if not wallet:
+                wallet = self.wallet_repo.create_default_wallet(user_id=user_id)
+        current_wallet_balance = wallet.balance if wallet else Decimal("0.00")
+        if dto.amount_limit>wallet.balance:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f'Ngân sách không đủ'
+                )
         
         self.repo.update_limit(budget, dto.amount_limit)
         return self.get_monthly_budget_progress(user_id, month, year)

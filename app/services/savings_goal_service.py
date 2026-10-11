@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
-
+from fastapi import HTTPException, status
 from app.models.savings_goal import SavingsGoal
 from app.repositories.savings_goal_repository import SavingsGoalRepository
 from app.schemas.savings_goal import SavingsGoalCreate, SavingsGoalUpdate
@@ -146,7 +146,10 @@ class SavingsGoalService:
         # Tiền nạp vào hũ phải có sẵn trong ví; không cho phép ví bị âm.
         wallet = self.wallet_repository.get_by_user_id(user_id)
         if wallet is None or wallet.balance < amount:
-            return None, "Insufficient wallet balance"
+            raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f'Ngân sách không đủ'
+                        )
 
         # Cập nhật ví, số dư hũ và lịch sử trong cùng session/commit.
         wallet.balance -= amount

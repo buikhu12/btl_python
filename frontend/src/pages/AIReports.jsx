@@ -2,8 +2,6 @@ import React, { useState, useEffect } from "react";
 import {
   Sparkles,
   TrendingUp,
-  AlertTriangle,
-  CheckCircle2,
   Calendar,
   RotateCw,
   PieChart as PieIcon,
@@ -25,6 +23,7 @@ export default function AIReports() {
 
   const [reportData, setReportData] = useState(null);
   const [aiData, setAiData] = useState(null);
+  const [aiError, setAiError] = useState("");
 
   const formatVND = (val) => {
     return new Intl.NumberFormat("vi-VN").format(Number(val) || 0) + " đ";
@@ -45,34 +44,27 @@ export default function AIReports() {
 
   const runAIAnalysis = async () => {
     setLoadingAI(true);
+    setAiError("");
     try {
-      const data = await getAIAnalysis(selectedMonth, selectedYear);
+      const data = await getAIAnalysis();
       setAiData(data);
     } catch (err) {
       console.error("Lỗi khi gọi AI phân tích:", err);
+      setAiError(err.response?.data?.detail || "Không thể phân tích báo cáo AI lúc này.");
     } finally {
       setLoadingAI(false);
     }
   };
 
+  // Tải báo cáo tháng khi thay đổi tháng/năm
   useEffect(() => {
     loadReport();
-    setAiData(null); // Reset AI report khi đổi tháng
   }, [selectedMonth, selectedYear]);
 
-  const getScoreColor = (score) => {
-    if (score >= 8) return "text-emerald-500 bg-emerald-50 border-emerald-200";
-    if (score >= 6) return "text-blue-500 bg-blue-50 border-blue-200";
-    if (score >= 4) return "text-amber-500 bg-amber-50 border-amber-200";
-    return "text-rose-500 bg-rose-50 border-rose-200";
-  };
-
-  const getScoreLabel = (score) => {
-    if (score >= 8) return "Rất Tốt";
-    if (score >= 6) return "Ổn Định";
-    if (score >= 4) return "Trung Bình";
-    return "Cần Chú Ý";
-  };
+  // Tự động phân tích AI khi vào trang
+  useEffect(() => {
+    runAIAnalysis();
+  }, []);
 
   return (
     <div className="flex-1 flex flex-col bg-[#f8fafc]">
@@ -85,7 +77,7 @@ export default function AIReports() {
               Gemini AI
             </span>
           </h1>
-          <p className="text-xs text-slate-400 mt-0.5">Phân tích tình hình tài chính theo tháng và tối ưu chi tiêu</p>
+          <p className="text-xs text-slate-400 mt-0.5">Phân tích dữ liệu giao dịch trong 180 ngày gần nhất</p>
         </div>
 
         {/* BỘ CHỌN THÁNG & NĂM */}
@@ -247,75 +239,48 @@ export default function AIReports() {
           </div>
 
           {/* AI RESULT */}
+          {aiError && (
+            <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {aiError}
+            </div>
+          )}
           {aiData ? (
             <div className="space-y-6 animate-in fade-in duration-300">
-              {/* Score & General Assessment */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {/* Score */}
-                <div className={`p-6 rounded-3xl border flex flex-col items-center justify-center text-center ${getScoreColor(aiData.financial_health_score)}`}>
-                  <span className="text-xs font-bold uppercase tracking-wider">Điểm sức khỏe tài chính</span>
-                  <div className="text-5xl font-black my-2">{aiData.financial_health_score}/10</div>
-                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-white/70 shadow-sm">
-                    {getScoreLabel(aiData.financial_health_score)}
-                  </span>
+                <div className="p-6 rounded-3xl border bg-white flex flex-col justify-center gap-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Tổng hợp 180 ngày</span>
+                  <span className="text-sm font-semibold text-emerald-600">Thu: {formatVND(aiData.report?.total_income)}</span>
+                  <span className="text-sm font-semibold text-rose-600">Chi: {formatVND(aiData.report?.total_expense)}</span>
+                  <span className="text-sm font-semibold text-slate-700">Số dư thu chi: {formatVND(aiData.report?.balance)}</span>
+                  <span className="text-xs text-slate-400">{aiData.report?.transaction_count ?? 0} giao dịch</span>
                 </div>
 
-                {/* Overall Assessment */}
-                <div className="md:col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col justify-center">
+                <div className="md:col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-100">
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-700 mb-2">
                     <ShieldCheck className="w-4 h-4 text-purple-600" />
-                    <span>Đánh giá tổng quan từ AI</span>
+                    <span>Phân tích từ Gemini</span>
                   </div>
-                  <p className="text-xs leading-relaxed text-slate-600 font-medium">
-                    {aiData.overall_assessment}
-                  </p>
-                  {aiData.is_mock && (
-                    <span className="text-[10px] text-amber-600 font-semibold mt-2">
-                      * Đang sử dụng phản hồi dự phòng từ hệ thống AI.
-                    </span>
-                  )}
+                  <p className="text-sm leading-relaxed text-slate-600 font-medium whitespace-pre-line">{aiData.analysis}</p>
                 </div>
               </div>
 
-              {/* Wasteful spending & Actionable recommendations */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* Cảnh báo chi tiêu lãng phí */}
+              {Object.keys(aiData.report?.expense_by_category ?? {}).length > 0 && (
                 <div className="bg-rose-50/60 border border-rose-100 rounded-3xl p-6">
-                  <div className="flex items-center gap-2 text-xs font-bold text-rose-800 mb-3">
-                    <AlertTriangle className="w-4 h-4 text-rose-600" />
-                    <span>Dấu hiệu chi tiêu chưa tối ưu</span>
-                  </div>
+                  <h3 className="text-xs font-bold text-rose-800 mb-3">Chi tiêu theo danh mục</h3>
                   <ul className="space-y-2">
-                    {aiData.wasteful_spending?.map((item, idx) => (
-                      <li key={idx} className="flex items-start gap-2 text-xs text-rose-700 font-medium">
-                        <span className="text-rose-400">•</span>
-                        <span>{item}</span>
+                    {Object.entries(aiData.report.expense_by_category).map(([name, amount]) => (
+                      <li key={name} className="flex justify-between gap-4 text-xs text-rose-700">
+                        <span>{name}</span><span className="font-semibold">{formatVND(amount)}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
-
-                {/* Hành động khuyến nghị */}
-                <div className="bg-emerald-50/60 border border-emerald-100 rounded-3xl p-6">
-                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 mb-3">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Khuyến nghị hành động tiếp theo</span>
-                  </div>
-                  <ul className="space-y-2">
-                    {aiData.actionable_recommendations?.map((item, idx) => (
-                      <li key={idx} className="flex items-start gap-2 text-xs text-emerald-700 font-medium">
-                        <span className="text-emerald-500 font-bold">{idx + 1}.</span>
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
+              )}
             </div>
           ) : (
             <div className="bg-slate-50 p-8 rounded-3xl border border-dashed border-slate-200 text-center text-slate-400 text-xs">
               <Sparkles className="w-8 h-8 mx-auto text-purple-300 mb-2" />
-              <p className="font-semibold text-slate-600">Chưa có kết quả phân tích cho tháng {selectedMonth}/{selectedYear}</p>
+              <p className="font-semibold text-slate-600">Chưa có kết quả phân tích AI</p>
               <p className="mt-1">Nhấn nút <b>"Phân tích với AI ngay"</b> ở trên để nhận lời khuyên tài chính thông minh.</p>
             </div>
           )}
