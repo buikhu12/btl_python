@@ -16,7 +16,9 @@ import {
   Edit2,
   TrendingDown,
   PieChart as BudgetIcon,
-  X
+  X,
+  CreditCard,
+  ArrowRight
 } from "lucide-react";
 import {
   getPlannedExpenses,
@@ -24,7 +26,8 @@ import {
   updatePlannedExpense,
   deletePlannedExpense,
   getBudgetProgress,
-  getCategories
+  getCategories,
+  createTransaction
 } from "../services/api";
 
 export default function PlannedExpenses() {
@@ -56,6 +59,18 @@ export default function PlannedExpenses() {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
 
+  // Modal tạo giao dịch khi nhấn "Đã chi"
+  const [showTxModal, setShowTxModal] = useState(false);
+  const [selectedPlanForTx, setSelectedPlanForTx] = useState(null);
+  const [txFormData, setTxFormData] = useState({
+    amount: "",
+    category_id: "",
+    occurred_at: "",
+    note: "",
+  });
+  const [txSubmitting, setTxSubmitting] = useState(false);
+  const [txError, setTxError] = useState("");
+
   const formatVND = (val) => {
     return new Intl.NumberFormat("vi-VN").format(Number(val) || 0) + " đ";
   };
@@ -81,6 +96,17 @@ export default function PlannedExpenses() {
 
   useEffect(() => {
     loadData();
+
+    const handleDataRefresh = () => {
+      loadData();
+    };
+
+    window.addEventListener("transaction-updated", handleDataRefresh);
+    window.addEventListener("budget-updated", handleDataRefresh);
+    return () => {
+      window.removeEventListener("transaction-updated", handleDataRefresh);
+      window.removeEventListener("budget-updated", handleDataRefresh);
+    };
   }, [loadData]);
 
   // Danh mục map để hiển thị tên
@@ -204,6 +230,109 @@ export default function PlannedExpenses() {
       setFormError(err.response?.data?.detail || "Không thể lưu kế hoạch chi tiêu!");
     } finally {
       setFormSubmitting(false);
+    }
+  };
+
+  const getInitialTxDateTime = (plan) => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const hours = pad(now.getHours());
+    const minutes = pad(now.getMinutes());
+
+    if (plan.planned_date) {
+      const datePart = plan.planned_date.slice(0, 10);
+      return `${datePart}T${hours}:${minutes}`;
+    }
+
+    const year = selectedYear;
+    const month = pad(selectedMonth);
+    let day = pad(Math.min(now.getDate(), 28));
+    if (now.getFullYear() !== selectedYear || (now.getMonth() + 1) !== selectedMonth) {
+      day = "15";
+    }
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  const handleOpenCreateTransaction = (plan) => {
+    setSelectedPlanForTx(plan);
+    setTxError("");
+    const defaultCatId = plan.category_id
+      ? plan.category_id.toString()
+      : expenseCategories[0]?.id
+      ? expenseCategories[0].id.toString()
+      : "";
+
+    setTxFormData({
+      amount: plan.estimated_amount ? plan.estimated_amount.toString() : "",
+      category_id: defaultCatId,
+      occurred_at: getInitialTxDateTime(plan),
+      note: `Chi cho kế hoạch: ${plan.title}`,
+    });
+    setShowTxModal(true);
+  };
+
+  const handleConfirmCreateTransaction = async (e) => {
+    e.preventDefault();
+    setTxError("");
+
+    if (!txFormData.amount || Number(txFormData.amount) <= 0) {
+      setTxError("Vui lòng nhập số tiền chi tiêu hợp lệ (> 0 đ)!");
+      return;
+    }
+    if (!txFormData.category_id) {
+      setTxError("Vui lòng chọn danh mục chi tiêu!");
+      return;
+    }
+    if (!txFormData.occurred_at) {
+      setTxError("Vui lòng chọn ngày giờ giao dịch!");
+      return;
+    }
+
+    setTxSubmitting(true);
+    try {
+      // 1. Tạo giao dịch chi tiêu thực tế
+      const payload = {
+        amount: parseFloat(txFormData.amount),
+        type: "expense",
+        category_id: parseInt(txFormData.category_id),
+        note: txFormData.note || `Chi cho kế hoạch: ${selectedPlanForTx.title}`,
+        occurred_at: new Date(txFormData.occurred_at).toISOString(),
+      };
+      await createTransaction(payload);
+
+      // 2. Đánh dấu kế hoạch là Đã chi (COMPLETED)
+      await updatePlannedExpense(selectedPlanForTx.id, {
+        status: "COMPLETED",
+      });
+
+      // 3. Đóng modal và phát sự kiện đồng bộ
+      setShowTxModal(false);
+      setSelectedPlanForTx(null);
+      window.dispatchEvent(new Event("transaction-updated"));
+      window.dispatchEvent(new Event("wallets-updated"));
+
+      // 4. Cập nhật lại toàn bộ dữ liệu (tự động cập nhật Thực tế đã chi và số lượng hoàn thành)
+      await loadData();
+    } catch (err) {
+      console.error("Lỗi khi tạo giao dịch:", err);
+      setTxError(err.response?.data?.detail || "Không thể tạo giao dịch cho kế hoạch này!");
+    } finally {
+      setTxSubmitting(false);
+    }
+  };
+
+  const handleMarkAsCompletedOnly = async () => {
+    if (!selectedPlanForTx) return;
+    setTxSubmitting(true);
+    try {
+      await updatePlannedExpense(selectedPlanForTx.id, { status: "COMPLETED" });
+      setShowTxModal(false);
+      setSelectedPlanForTx(null);
+      await loadData();
+    } catch (err) {
+      setTxError(err.response?.data?.detail || "Không thể đổi trạng thái!");
+    } finally {
+      setTxSubmitting(false);
     }
   };
 
@@ -560,9 +689,9 @@ export default function PlannedExpenses() {
                   <div className="flex items-center gap-1.5">
                     {isPending && (
                       <button
-                        onClick={() => handleQuickStatusChange(plan, "COMPLETED")}
-                        title="Đánh dấu đã hoàn thành khoản chi này"
-                        className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold rounded-xl transition flex items-center gap-1"
+                        onClick={() => handleOpenCreateTransaction(plan)}
+                        title="Tạo giao dịch chi tiêu và đánh dấu đã chi"
+                        className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold rounded-xl transition flex items-center gap-1 shadow-sm hover:shadow active:scale-95"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
                         <span>Đã chi</span>
@@ -767,6 +896,172 @@ export default function PlannedExpenses() {
                   ? "Cập nhật kế hoạch"
                   : "Xác nhận thêm kế hoạch"}
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL TẠO GIAO DỊCH KHI NHẤN "ĐÃ CHI" */}
+      {showTxModal && selectedPlanForTx && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-md shadow-2xl border border-slate-100 relative max-h-[90vh] overflow-y-auto">
+            {/* Nút đóng */}
+            <button
+              onClick={() => {
+                setShowTxModal(false);
+                setSelectedPlanForTx(null);
+              }}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Header modal */}
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <CreditCard className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-slate-800">Tạo Giao Dịch Chi Tiêu</h2>
+                <p className="text-xs text-slate-400">Ghi nhận giao dịch thực tế cho kế hoạch</p>
+              </div>
+            </div>
+
+            {/* Tóm tắt kế hoạch */}
+            <div className="mt-4 mb-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Khoản kế hoạch thực hiện
+              </span>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-sm font-extrabold text-slate-800 truncate pr-2">
+                  {selectedPlanForTx.title}
+                </span>
+                <span className="text-xs font-black text-purple-700 bg-purple-50 px-2 py-0.5 rounded-lg border border-purple-100 shrink-0">
+                  Dự tính: {formatVND(selectedPlanForTx.estimated_amount)}
+                </span>
+              </div>
+            </div>
+
+            {txError && (
+              <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{txError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmCreateTransaction} className="space-y-4">
+              {/* Số tiền thực tế chi */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Số tiền thực chi (VNĐ) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    step="any"
+                    required
+                    value={txFormData.amount}
+                    onChange={(e) => setTxFormData({ ...txFormData, amount: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    placeholder="Nhập số tiền thực tế..."
+                  />
+                  <span className="absolute right-3.5 top-2.5 text-xs font-bold text-slate-400">
+                    VNĐ
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Mặc định theo số tiền dự tính, bạn có thể chỉnh sửa nếu thực tế chi khác.
+                </p>
+              </div>
+
+              {/* Danh mục */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Danh mục chi tiêu <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  required
+                  value={txFormData.category_id}
+                  onChange={(e) => setTxFormData({ ...txFormData, category_id: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                >
+                  <option value="">-- Chọn danh mục chi tiêu --</option>
+                  {expenseCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Thời gian chi tiêu */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Thời gian chi tiêu <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={txFormData.occurred_at}
+                  onChange={(e) => setTxFormData({ ...txFormData, occurred_at: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                />
+              </div>
+
+              {/* Ghi chú */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Ghi chú giao dịch
+                </label>
+                <input
+                  type="text"
+                  value={txFormData.note}
+                  onChange={(e) => setTxFormData({ ...txFormData, note: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  placeholder="Ghi chú thêm nếu có..."
+                />
+              </div>
+
+              <div className="p-3 bg-emerald-50/70 rounded-xl border border-emerald-100 text-[11px] text-emerald-800 leading-relaxed">
+                💡 Giao dịch sẽ được ghi nhận vào lịch sử giao dịch, tự động trừ vào số dư Ví và cập nhật ngay vào mục <strong>Thực tế đã chi</strong> của tháng {selectedMonth}/{selectedYear}.
+              </div>
+
+              {/* Nút hành động */}
+              <div className="pt-2 space-y-2">
+                <button
+                  type="submit"
+                  disabled={txSubmitting}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>
+                    {txSubmitting ? "Đang tạo giao dịch..." : "Xác nhận tạo giao dịch & Đánh dấu đã chi"}
+                  </span>
+                </button>
+
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={handleMarkAsCompletedOnly}
+                    disabled={txSubmitting}
+                    className="text-[11px] font-semibold text-slate-500 hover:text-purple-600 transition"
+                  >
+                    Chỉ đổi trạng thái Đã chi (không tạo giao dịch)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTxModal(false);
+                      setSelectedPlanForTx(null);
+                    }}
+                    className="text-[11px] font-bold text-slate-400 hover:text-slate-600"
+                  >
+                    Hủy bỏ
+                  </button>
+                </div>
+              </div>
             </form>
           </div>
         </div>
