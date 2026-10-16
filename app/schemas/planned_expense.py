@@ -21,6 +21,7 @@ class PlannedExpenseCreate(PlannedExpenseBase):
 class PlannedExpenseUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     estimated_amount: Optional[Decimal] = Field(None, gt=0)
+    actual_amount: Optional[Decimal] = Field(None, ge=0)
     category_id: Optional[int] = None
     is_recurring: Optional[bool] = None
     status: Optional[str] = Field(None, description="PENDING, COMPLETED, CANCELLED")

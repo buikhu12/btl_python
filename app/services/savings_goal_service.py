@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -8,6 +9,9 @@ from app.schemas.savings_goal import SavingsGoalCreate, SavingsGoalUpdate
 from app.models.savings_contribution import SavingsContribution
 from app.models.wallet import Wallet
 from app.repositories.wallet_repository import WalletRepository
+from app.models.transaction import Transaction
+from app.models.category import Category
+from app.repositories.category_repository import CategoryRepository
 
 class SavingsGoalService:
 
@@ -129,11 +133,11 @@ class SavingsGoalService:
         }
 
     def add_money(
-    self,
-    goal_id: int,
-    user_id: int,
-    amount: Decimal,
-    note: str | None = None
+        self,
+        goal_id: int,
+        user_id: int,
+        amount: Decimal,
+        note: str | None = None
     ):
         goal = self.repository.get_by_id(
             goal_id,
@@ -147,9 +151,9 @@ class SavingsGoalService:
         wallet = self.wallet_repository.get_by_user_id(user_id)
         if wallet is None or wallet.balance < amount:
             raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f'Ngân sách không đủ'
-                        )
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f'Ngân sách không đủ'
+            )
 
         # Cập nhật ví, số dư hũ và lịch sử trong cùng session/commit.
         wallet.balance -= amount
@@ -161,8 +165,37 @@ class SavingsGoalService:
             type="DEPOSIT",
             note=note
         )
-
         self.repository.db.add(contribution)
+
+        # Tạo giao dịch chi tiêu tương ứng để tính vào số giao dịch và lịch sử ví
+        category_repo = CategoryRepository(self.repository.db)
+        existing_cats = category_repo.get_many(user_id, "expense")
+        saving_cat = next((c for c in existing_cats if c.name.strip().lower() == "tiết kiệm"), None)
+        if saving_cat is None:
+            saving_cat = Category(
+                user_id=user_id,
+                name="Tiết kiệm",
+                type="expense",
+                color="#10b981",
+                icon="PiggyBank"
+            )
+            self.repository.db.add(saving_cat)
+            self.repository.db.flush()
+
+        tx_note = f"Tiết kiệm: {goal.name}"
+        if note and note.strip():
+            tx_note = f"{tx_note} - {note.strip()}"
+
+        transaction = Transaction(
+            user_id=user_id,
+            wallet_id=wallet.id,
+            category_id=saving_cat.id if saving_cat else None,
+            type="expense",
+            amount=amount,
+            note=tx_note,
+            occurred_at=datetime.now(timezone.utc)
+        )
+        self.repository.db.add(transaction)
 
         goal = self.repository.update(goal)
 
@@ -170,11 +203,11 @@ class SavingsGoalService:
 
 
     def withdraw_money(
-    self,
-    goal_id: int,
-    user_id: int,
-    amount: Decimal,
-    note: str | None = None
+        self,
+        goal_id: int,
+        user_id: int,
+        amount: Decimal,
+        note: str | None = None
     ):
         goal = self.repository.get_by_id(
             goal_id,
@@ -197,6 +230,7 @@ class SavingsGoalService:
                 currency="VND",
             )
             self.repository.db.add(wallet)
+            self.repository.db.flush()
 
         wallet.balance += amount
         goal.current_amount -= amount
@@ -207,8 +241,37 @@ class SavingsGoalService:
             type="WITHDRAW",
             note=note
         )
-
         self.repository.db.add(contribution)
+
+        # Tạo giao dịch thu nhập tương ứng khi hoàn tiền về ví
+        category_repo = CategoryRepository(self.repository.db)
+        existing_income_cats = category_repo.get_many(user_id, "income")
+        saving_income_cat = next((c for c in existing_income_cats if c.name.strip().lower() == "tiết kiệm"), None)
+        if saving_income_cat is None:
+            saving_income_cat = Category(
+                user_id=user_id,
+                name="Tiết kiệm",
+                type="income",
+                color="#10b981",
+                icon="PiggyBank"
+            )
+            self.repository.db.add(saving_income_cat)
+            self.repository.db.flush()
+
+        tx_note = f"Rút tiết kiệm: {goal.name}"
+        if note and note.strip():
+            tx_note = f"{tx_note} - {note.strip()}"
+
+        transaction = Transaction(
+            user_id=user_id,
+            wallet_id=wallet.id,
+            category_id=saving_income_cat.id if saving_income_cat else None,
+            type="income",
+            amount=amount,
+            note=tx_note,
+            occurred_at=datetime.now(timezone.utc)
+        )
+        self.repository.db.add(transaction)
 
         goal = self.repository.update(goal)
 

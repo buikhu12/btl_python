@@ -283,8 +283,9 @@ export default function PlannedExpenses() {
     setTxSubmitting(true);
     try {
       // 1. Tạo giao dịch chi tiêu thực tế
+      const actualAmt = parseFloat(txFormData.amount);
       const payload = {
-        amount: parseFloat(txFormData.amount),
+        amount: actualAmt,
         type: "expense",
         category_id: parseInt(txFormData.category_id),
         note: txFormData.note || `Chi cho kế hoạch: ${selectedPlanForTx.title}`,
@@ -294,9 +295,10 @@ export default function PlannedExpenses() {
       };
       await createTransaction(payload);
 
-      // 2. Đánh dấu kế hoạch là Đã chi (COMPLETED)
+      // 2. Đánh dấu kế hoạch là Đã chi (COMPLETED) và lưu số tiền thực tế đã chi
       await updatePlannedExpense(selectedPlanForTx.id, {
         status: "COMPLETED",
+        actual_amount: actualAmt,
       });
 
       // 3. Đóng modal và phát sự kiện đồng bộ toàn bộ app
@@ -323,7 +325,11 @@ export default function PlannedExpenses() {
     if (!selectedPlanForTx) return;
     setTxSubmitting(true);
     try {
-      await updatePlannedExpense(selectedPlanForTx.id, { status: "COMPLETED" });
+      const amt = selectedPlanForTx.estimated_amount ? parseFloat(selectedPlanForTx.estimated_amount) : 0;
+      await updatePlannedExpense(selectedPlanForTx.id, {
+        status: "COMPLETED",
+        actual_amount: amt,
+      });
       setShowTxModal(false);
       setSelectedPlanForTx(null);
       await loadData();
@@ -336,7 +342,13 @@ export default function PlannedExpenses() {
 
   const handleQuickStatusChange = async (plan, nextStatus) => {
     try {
-      await updatePlannedExpense(plan.id, { status: nextStatus });
+      const payload = { status: nextStatus };
+      if (nextStatus === "COMPLETED" && (!plan.actual_amount || Number(plan.actual_amount) === 0)) {
+        payload.actual_amount = parseFloat(plan.estimated_amount);
+      } else if (nextStatus === "PENDING") {
+        payload.actual_amount = 0;
+      }
+      await updatePlannedExpense(plan.id, payload);
       loadData();
     } catch (err) {
       alert(err.response?.data?.detail || "Không thể đổi trạng thái kế hoạch!");
@@ -687,24 +699,39 @@ export default function PlannedExpenses() {
                   )}
 
                   {/* Amount display */}
-                  <div className="mt-4 p-3 rounded-2xl bg-slate-50 border border-slate-100/80 flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] font-semibold text-slate-400 block uppercase">
-                        Dự tính chi
-                      </span>
-                      <span className="text-base font-black text-slate-800">
-                        {formatVND(plan.estimated_amount)}
-                      </span>
+                  <div className="mt-4 p-3 rounded-2xl bg-slate-50 border border-slate-100/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-semibold text-slate-400 block uppercase">
+                          Dự tính chi
+                        </span>
+                        <span className="text-base font-black text-slate-800">
+                          {formatVND(plan.estimated_amount)}
+                        </span>
+                      </div>
+
+                      {plan.planned_date && (
+                        <div className="text-right">
+                          <span className="text-[10px] font-semibold text-slate-400 block uppercase">
+                            Ngày dự kiến
+                          </span>
+                          <span className="text-xs font-bold text-slate-600 flex items-center gap-1 justify-end">
+                            <Calendar className="w-3 h-3 text-slate-400" />
+                            {new Date(plan.planned_date).toLocaleDateString("vi-VN")}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
-                    {plan.planned_date && (
-                      <div className="text-right">
-                        <span className="text-[10px] font-semibold text-slate-400 block uppercase">
-                          Ngày dự kiến
+                    {/* DÒNG THỰC TẾ ĐÃ CHI KHI ĐÃ CHI */}
+                    {(isCompleted || Number(plan.actual_amount) > 0) && (
+                      <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between bg-emerald-50/70 -mx-3 -mb-3 p-2.5 px-3 rounded-b-2xl">
+                        <span className="text-[11px] font-bold text-emerald-800 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Thực tế đã chi:</span>
                         </span>
-                        <span className="text-xs font-bold text-slate-600 flex items-center gap-1 justify-end">
-                          <Calendar className="w-3 h-3 text-slate-400" />
-                          {new Date(plan.planned_date).toLocaleDateString("vi-VN")}
+                        <span className="text-sm font-black text-emerald-700">
+                          {formatVND(Number(plan.actual_amount) > 0 ? plan.actual_amount : plan.estimated_amount)}
                         </span>
                       </div>
                     )}

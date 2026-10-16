@@ -128,6 +128,10 @@ export default function SavingsGoals() {
         await withdrawSavings(activeGoal.id, amount, actionNote);
       }
 
+      window.dispatchEvent(new Event("transaction-updated"));
+      window.dispatchEvent(new Event("wallets-updated"));
+      window.dispatchEvent(new Event("categories-updated"));
+
       setActiveGoal(null);
       loadGoals();
     } catch (err) {
