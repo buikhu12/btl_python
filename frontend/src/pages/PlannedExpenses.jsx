@@ -70,6 +70,7 @@ export default function PlannedExpenses() {
   });
   const [txSubmitting, setTxSubmitting] = useState(false);
   const [txError, setTxError] = useState("");
+  const [successToast, setSuccessToast] = useState("");
 
   const formatVND = (val) => {
     return new Intl.NumberFormat("vi-VN").format(Number(val) || 0) + " đ";
@@ -236,20 +237,11 @@ export default function PlannedExpenses() {
   const getInitialTxDateTime = (plan) => {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, "0");
+    const year = now.getFullYear();
+    const month = pad(now.getMonth() + 1);
+    const day = pad(now.getDate());
     const hours = pad(now.getHours());
     const minutes = pad(now.getMinutes());
-
-    if (plan.planned_date) {
-      const datePart = plan.planned_date.slice(0, 10);
-      return `${datePart}T${hours}:${minutes}`;
-    }
-
-    const year = selectedYear;
-    const month = pad(selectedMonth);
-    let day = pad(Math.min(now.getDate(), 28));
-    if (now.getFullYear() !== selectedYear || (now.getMonth() + 1) !== selectedMonth) {
-      day = "15";
-    }
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
 
@@ -296,7 +288,9 @@ export default function PlannedExpenses() {
         type: "expense",
         category_id: parseInt(txFormData.category_id),
         note: txFormData.note || `Chi cho kế hoạch: ${selectedPlanForTx.title}`,
-        occurred_at: new Date(txFormData.occurred_at).toISOString(),
+        occurred_at: txFormData.occurred_at
+          ? new Date(txFormData.occurred_at).toISOString()
+          : new Date().toISOString(),
       };
       await createTransaction(payload);
 
@@ -305,11 +299,15 @@ export default function PlannedExpenses() {
         status: "COMPLETED",
       });
 
-      // 3. Đóng modal và phát sự kiện đồng bộ
+      // 3. Đóng modal và phát sự kiện đồng bộ toàn bộ app
       setShowTxModal(false);
       setSelectedPlanForTx(null);
       window.dispatchEvent(new Event("transaction-updated"));
       window.dispatchEvent(new Event("wallets-updated"));
+      window.dispatchEvent(new Event("budget-updated"));
+
+      setSuccessToast("Đã tạo giao dịch và ghi nhận vào Sổ giao dịch thành công!");
+      setTimeout(() => setSuccessToast(""), 6000);
 
       // 4. Cập nhật lại toàn bộ dữ liệu (tự động cập nhật Thực tế đã chi và số lượng hoàn thành)
       await loadData();
@@ -417,6 +415,35 @@ export default function PlannedExpenses() {
 
       {/* BODY */}
       <div className="p-6 lg:p-8 space-y-6">
+        {/* THÔNG BÁO TẠO GIAO DỊCH THÀNH CÔNG */}
+        {successToast && (
+          <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-emerald-900">{successToast}</p>
+                <p className="text-xs text-emerald-700">Giao dịch đã được trừ vào số dư Ví và hiển thị trong Sổ Giao Dịch.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate("/transactions")}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm whitespace-nowrap"
+              >
+                Xem Sổ Giao Dịch &rarr;
+              </button>
+              <button
+                onClick={() => setSuccessToast("")}
+                className="p-1 text-emerald-600 hover:text-emerald-800 rounded-lg hover:bg-emerald-100 transition text-sm font-bold px-2"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* CẢNH BÁO NẾU CHƯA CÓ NGÂN SÁCH */}
         {!budgetLimit && !loading && (
           <div className="p-5 rounded-3xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm animate-in fade-in">

@@ -92,6 +92,19 @@ export default function Transactions() {
     return () => window.removeEventListener("categories-updated", handleCategoriesUpdated);
   }, []);
 
+  // Lắng nghe sự kiện giao dịch mới từ Kế hoạch chi tiêu, Dashboard, Quick Add...
+  useEffect(() => {
+    const handleTransactionsUpdated = () => {
+      loadData();
+    };
+    window.addEventListener("transaction-updated", handleTransactionsUpdated);
+    window.addEventListener("focus", handleTransactionsUpdated);
+    return () => {
+      window.removeEventListener("transaction-updated", handleTransactionsUpdated);
+      window.removeEventListener("focus", handleTransactionsUpdated);
+    };
+  }, [loadData]);
+
   // Tra cứu category_name từ categories khi backend không trả trường này
   const categoryMap = useMemo(() => {
     const map = {};
@@ -246,21 +259,34 @@ export default function Transactions() {
     }
   };
 
-  // Lọc tìm kiếm theo note hoặc tên danh mục
-  const filteredTransactions = transactions.filter((tx) => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.toLowerCase();
-    const noteMatch = tx.note?.toLowerCase().includes(term);
-    const catMatch = getCategoryName(tx).toLowerCase().includes(term);
-    return noteMatch || catMatch;
-  });
+  // Lọc tìm kiếm theo note hoặc tên danh mục và sắp xếp giao dịch mới nhất lên đầu
+  const filteredTransactions = useMemo(() => {
+    const list = transactions.filter((tx) => {
+      if (!searchTerm.trim()) return true;
+      const term = searchTerm.toLowerCase();
+      const noteMatch = tx.note?.toLowerCase().includes(term);
+      const catMatch = getCategoryName(tx).toLowerCase().includes(term);
+      return noteMatch || catMatch;
+    });
+
+    return [...list].sort((a, b) => {
+      const timeDiff = new Date(b.occurred_at || 0) - new Date(a.occurred_at || 0);
+      if (timeDiff !== 0) return timeDiff;
+      return (b.id || 0) - (a.id || 0);
+    });
+  }, [transactions, searchTerm, categoryMap]);
 
   return (
     <div className="flex-1 flex flex-col bg-[#f8fafc]">
       {/* HEADER */}
       <header className="bg-white border-b border-slate-200/80 px-8 py-5 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div>
-          <h1 className="text-xl font-black text-slate-800 tracking-tight">Sổ Giao Dịch</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-black text-slate-800 tracking-tight">Sổ Giao Dịch</h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[11px] font-bold border border-purple-200">
+              {filteredTransactions.length} giao dịch
+            </span>
+          </div>
           <p className="text-xs text-slate-400 mt-0.5">Quản lý và thống kê chi tiết các khoản thu chi</p>
         </div>
 
