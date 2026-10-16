@@ -1,6 +1,7 @@
 # app/services/ai_service.py
 
 import json
+import logging
 import os
 from collections import defaultdict
 from datetime import datetime
@@ -13,8 +14,11 @@ from sqlalchemy.orm import Session
 
 from app.models.transaction import Transaction
 from app.models.category import Category
+from app.models.budget import Budget
+from app.models.planned_expense import PlannedExpense
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 def analyze_report(
@@ -46,12 +50,14 @@ def analyze_report(
         )
         period_label = f"Tháng {selected_month:02d}/{selected_year}"
     elif period == "year":
+        selected_month = None
         start_date = datetime(selected_year, 1, 1)
         end_date = datetime(selected_year + 1, 1, 1)
         period_label = f"Năm {selected_year}"
     else:
         raise RuntimeError("period must be 'month' or 'year'")
 
+    # 1. Thu thập dữ liệu Giao dịch thực tế (Transactions)
     rows = (
         db.query(Transaction, Category.name.label("category_name"))
         .outerjoin(
@@ -81,31 +87,148 @@ def analyze_report(
     for transaction, category_name in rows:
         amount = Decimal(str(transaction.amount))
         transaction_type = transaction.type.lower()
-
-        month = transaction.occurred_at.strftime("%Y-%m")
+        m_key = transaction.occurred_at.strftime("%Y-%m")
 
         if transaction_type == "income":
             total_income += amount
-            monthly[month]["income"] += amount
-
+            monthly[m_key]["income"] += amount
         elif transaction_type == "expense":
             total_expense += amount
-            monthly[month]["expense"] += amount
+            monthly[m_key]["expense"] += amount
+            categories[category_name or "Chưa phân loại"] += amount
 
-            categories[category_name or "Uncategorized"] += amount
+    # 2. Thu thập dữ liệu Ngân sách (Budget)
+    if period == "month":
+        budget_row = (
+            db.query(Budget)
+            .filter(
+                Budget.user_id == user_id,
+                Budget.month == selected_month,
+                Budget.year == selected_year,
+            )
+            .first()
+        )
+        budget_limit = float(budget_row.amount_limit) if budget_row else 0.0
+        has_budget = budget_row is not None
+        budget_label = f"Tháng {selected_month:02d}/{selected_year}"
+    else:
+        budget_rows = (
+            db.query(Budget)
+            .filter(
+                Budget.user_id == user_id,
+                Budget.year == selected_year,
+            )
+            .all()
+        )
+        budget_limit = sum(float(b.amount_limit) for b in budget_rows)
+        has_budget = len(budget_rows) > 0
+        budget_label = f"Năm {selected_year} ({len(budget_rows)} tháng đã đặt)"
 
+    spent_val = float(total_expense)
+    budget_remaining = max(0.0, budget_limit - spent_val) if budget_limit > 0 else 0.0
+    budget_usage_pct = round((spent_val / budget_limit) * 100, 1) if budget_limit > 0 else 0.0
+
+    if budget_limit > 0:
+        if budget_usage_pct >= 100:
+            budget_status = "OVER_BUDGET"
+            budget_status_label = "Vượt trần ngân sách"
+        elif budget_usage_pct >= 80:
+            budget_status = "WARNING"
+            budget_status_label = "Tiệm cận trần ngân sách"
+        else:
+            budget_status = "SAFE"
+            budget_status_label = "Trong giới hạn an toàn"
+    else:
+        budget_status = "NOT_SET"
+        budget_status_label = "Chưa thiết lập ngân sách"
+
+    budget_info = {
+        "has_budget": has_budget,
+        "label": budget_label,
+        "amount_limit": budget_limit,
+        "total_spent": spent_val,
+        "remaining": budget_remaining,
+        "usage_percent": budget_usage_pct,
+        "status": budget_status,
+        "status_label": budget_status_label,
+    }
+
+    # 3. Thu thập dữ liệu Kế hoạch chi tiêu (Planned Expenses)
+    plan_query = (
+        db.query(PlannedExpense, Category.name.label("category_name"))
+        .outerjoin(Category, PlannedExpense.category_id == Category.id)
+        .filter(PlannedExpense.user_id == user_id, PlannedExpense.year == selected_year)
+    )
+    if period == "month":
+        plan_query = plan_query.filter(PlannedExpense.month == selected_month)
+
+    plan_rows = plan_query.order_by(PlannedExpense.created_at.desc()).all()
+
+    total_plans_count = len(plan_rows)
+    total_estimated = Decimal("0")
+    completed_estimated = Decimal("0")
+    pending_estimated = Decimal("0")
+    completed_count = 0
+    pending_count = 0
+    cancelled_count = 0
+    plans_list = []
+
+    for plan, cat_name in plan_rows:
+        est = Decimal(str(plan.estimated_amount or 0))
+        act = Decimal(str(plan.actual_amount or 0))
+        st = (plan.status or "PENDING").upper()
+
+        if st != "CANCELLED":
+            total_estimated += est
+
+        if st == "COMPLETED":
+            completed_count += 1
+            completed_estimated += est
+        elif st == "PENDING":
+            pending_count += 1
+            pending_estimated += est
+        elif st == "CANCELLED":
+            cancelled_count += 1
+
+        plans_list.append({
+            "title": plan.title,
+            "category": cat_name or "Khác",
+            "estimated_amount": float(est),
+            "actual_amount": float(act),
+            "status": st,
+            "is_recurring": bool(plan.is_recurring),
+            "planned_date": plan.planned_date.strftime("%d/%m/%Y") if plan.planned_date else None,
+            "month": plan.month,
+        })
+
+    planned_info = {
+        "total_plans": total_plans_count,
+        "total_estimated": float(total_estimated),
+        "completed_count": completed_count,
+        "completed_estimated": float(completed_estimated),
+        "pending_count": pending_count,
+        "pending_estimated": float(pending_estimated),
+        "cancelled_count": cancelled_count,
+        "items": plans_list[:12],
+    }
+
+    # Tổng hợp báo cáo dữ liệu hoàn chỉnh
     report = {
         "period": period_label,
+        "period_type": period,
+        "selected_month": selected_month,
+        "selected_year": selected_year,
         "transaction_count": len(rows),
         "total_income": float(total_income),
         "total_expense": float(total_expense),
         "balance": float(total_income - total_expense),
+        "savings_rate": round(float((total_income - total_expense) / total_income * 100), 1) if total_income > 0 else 0.0,
         "monthly": {
-            month: {
+            m: {
                 "income": float(values["income"]),
                 "expense": float(values["expense"])
             }
-            for month, values in sorted(monthly.items())
+            for m, values in sorted(monthly.items())
         },
         "expense_by_category": {
             name: float(amount)
@@ -114,34 +237,52 @@ def analyze_report(
                 key=lambda item: item[1],
                 reverse=True
             )
-        }
+        },
+        "budget": budget_info,
+        "planned_expenses": planned_info,
     }
 
-    if len(rows) == 0:
+    if len(rows) == 0 and not has_budget and total_plans_count == 0:
         return {
             "report": report,
-            "analysis": f"No transactions were found for {period_label}. Start recording income and expenses to receive an AI analysis.",
+            "analysis": (
+                f"### ℹ️ Chưa có dữ liệu tài chính trong {period_label}\n\n"
+                f"Hệ thống chưa ghi nhận giao dịch, ngân sách hoặc kế hoạch chi tiêu nào trong kỳ này.\n\n"
+                f"👉 **Gợi ý bắt đầu:**\n"
+                f"- Thêm giao dịch thu/chi hàng ngày\n"
+                f"- Thiết lập hạn mức Ngân sách tháng\n"
+                f"- Lập danh sách Kế hoạch chi tiêu dự kiến để AI phân tích và đưa ra lời khuyên tối ưu nhất!"
+            ),
         }
 
     prompt = f"""
-Bạn là trợ lý phân tích tài chính cá nhân.
+Bạn là chuyên gia cố vấn tài chính cá nhân thông minh và tận tâm.
 
-Hãy phân tích báo cáo tài chính cho {period_label} dưới đây bằng tiếng Việt.
+Nhiệm vụ: Phân tích toàn diện tình hình tài chính cho {period_label} dựa trên 3 trụ cột dữ liệu:
+1. Thu chi thực tế (Transactions)
+2. Ngân sách định mức (Budget)
+3. Kế hoạch chi tiêu dự kiến (Planned Expenses)
 
-Dữ liệu báo cáo:
-{json.dumps(report, ensure_ascii=False)}
+Dữ liệu hệ thống:
+{json.dumps(report, ensure_ascii=False, indent=2)}
 
-Yêu cầu:
-1. Tóm tắt thu nhập, chi tiêu và số dư.
-2. Nếu báo cáo theo năm, hãy nhận xét xu hướng thu nhập và chi tiêu qua các tháng; nếu theo tháng, tập trung nhận xét kỳ tháng đã chọn.
-3. Chỉ ra các danh mục chi tiêu lớn nhất.
-4. Nêu những dấu hiệu bất thường nếu dữ liệu thực sự cho thấy.
-5. Đề xuất 3 hành động thực tế để cải thiện tài chính.
-6. Không tự bịa số liệu hoặc suy đoán dữ liệu còn thiếu.
-7. Nếu dữ liệu chưa đủ, hãy nói rõ giới hạn.
-8. Đây là phân tích tham khảo, không phải lời khuyên đầu tư.
+YÊU CẦU TRÌNH BÀY (BẮT BUỘC):
+- Viết bằng tiếng Việt, phong cách chuyên nghiệp, tích cực, súc tích và mạch lạc.
+- Sử dụng cấu trúc 5 phần rõ ràng với biểu tượng cảm xúc (emoji) như sau:
+  📊 1. Tổng quan Dòng tiền & Tích lũy
+  🎯 2. Kiểm soát Ngân sách (Budget)
+  📅 3. Tiến độ Kế hoạch Chi tiêu (Planned Expenses)
+  🏷️ 4. Phân tích Danh mục Chi tiêu Trọng điểm
+  💡 5. Lộ trình Hành động & Tối ưu Tài chính
 
-Đơn vị tiền tệ: VND.
+NỘI DUNG PHÂN TÍCH:
+- Phần 1: Tóm tắt thu, chi, số dư ròng và tỷ lệ tiết kiệm.
+- Phần 2: Đánh giá tỷ lệ sử dụng ngân sách ({budget_info['usage_percent']}% trên hạn mức {budget_info['amount_limit']:,.0f} đ). Cảnh báo nếu chi tiêu tiệm cận hoặc vượt trần ngân sách. Nếu chưa đặt ngân sách, hãy khuyến nghị đặt hạn mức.
+- Phần 3: Phân tích kế hoạch chi tiêu ({planned_info['total_plans']} khoản, tổng dự tính {planned_info['total_estimated']:,.0f} đ). Nêu rõ số khoản đã chi ({planned_info['completed_count']}) và số khoản đang chờ ({planned_info['pending_count']}). Đánh giá xem các khoản chờ chi có thể làm vỡ ngân sách không.
+- Phần 4: Nêu các danh mục chiếm tỷ trọng lớn và các dấu hiệu cần lưu ý.
+- Phần 5: Đưa ra chính xác 3-4 lời khuyên hành động thực tế, cụ thể và khả thi.
+
+Đơn vị tiền tệ: VND (viết kèm đ).
 """
 
     try:
@@ -157,27 +298,58 @@ Yêu cầu:
                 "analysis": response.text
             }
     except Exception as err:
-        import logging
-        logging.getLogger(__name__).warning("Gemini AI API unavailable (%s), using rule-based analysis.", err)
+        logger.warning("Gemini AI API unavailable (%s), using rule-based analysis.", err)
 
-    # Phân tích dự phòng thông minh khi Gemini AI tạm thời bận hoặc quá tải
+    # Phân tích dự phòng thông minh khi Gemini AI tạm thời bận hoặc không kết nối được
     top_cats = list(report["expense_by_category"].items())[:3]
-    top_cats_str = ", ".join([f"{name}: {int(amount):,} đ" for name, amount in top_cats]) if top_cats else "Chưa có danh mục cụ thể"
+    top_cats_str = ", ".join([f"**{name}**: {int(amount):,} đ" for name, amount in top_cats]) if top_cats else "Chưa có danh mục cụ thể"
 
-    fallback_analysis = (
-        f"Financial analysis for {period_label}:\n\n"
-        f"1. Tổng quan dòng tiền:\n"
-        f"• Tổng thu nhập: {int(report['total_income']):,} đ\n"
-        f"• Tổng chi tiêu: {int(report['total_expense']):,} đ\n"
-        f"• Số dư ròng: {int(report['balance']):,} đ ({'Dương - tình hình tích cực' if report['balance'] >= 0 else 'Âm - chi vượt thu'})\n\n"
-        f"2. Danh mục chi tiêu trọng điểm:\n"
-        f"• Top danh mục chi nhiều nhất: {top_cats_str}\n\n"
-        f"3. Khuyến nghị tài chính thiết thực:\n"
-        f"• Áp dụng quy tắc 50/30/20: 50% chi tiêu thiết yếu, 30% sở thích cá nhân, 20% tích lũy.\n"
-        f"• Đặt hạn mức chi tiêu cho các nhóm chi lớn để tránh bội chi ngoài dự kiến.\n"
-        f"• Tiếp tục ghi chép đều đặn các khoản phát sinh để AI theo dõi biến động tài chính chính xác nhất.\n\n"
-        f"*(Phân tích tham khảo hỗ trợ quản lý tài chính cá nhân)*"
-    )
+    # Đánh giá Ngân sách
+    if budget_info["has_budget"]:
+        b_limit_str = f"{int(budget_info['amount_limit']):,} đ"
+        b_pct_str = f"{budget_info['usage_percent']}%"
+        if budget_info["status"] == "OVER_BUDGET":
+            budget_comment = f"⚠️ **Cảnh báo vượt trần**: Bạn đã chi **{int(spent_val):,} đ**, vượt **{int(spent_val - budget_info['amount_limit']):,} đ** so với hạn mức ngân sách ({b_limit_str}) - đạt tỷ lệ **{b_pct_str}**."
+        elif budget_info["status"] == "WARNING":
+            budget_comment = f"⚡ **Cảnh báo tiệm cận**: Bạn đã tiêu thụ **{b_pct_str}** ngân sách ({int(spent_val):,} đ / {b_limit_str}). Cần kiểm soát chặt chẽ các khoản chi không cấp thiết."
+        else:
+            budget_comment = f"✅ **Kiểm soát tốt**: Bạn mới sử dụng **{b_pct_str}** ngân sách ({int(spent_val):,} đ / {b_limit_str}). Còn khả dụng **{int(budget_info['remaining']):,} đ**."
+    else:
+        budget_comment = "💡 **Chưa đặt ngân sách**: Bạn chưa thiết lập ngân sách cho kỳ này. Nên cài đặt hạn mức chi tiêu để kiểm soát dòng tiền tốt hơn."
+
+    # Đánh giá Kế hoạch chi tiêu
+    if planned_info["total_plans"] > 0:
+        plan_comment = (
+            f"📋 Đã lập **{planned_info['total_plans']} khoản kế hoạch** với tổng dự tính **{int(planned_info['total_estimated']):,} đ**.\n"
+            f"• **Đã thực hiện**: **{planned_info['completed_count']} mục** ({int(planned_info['completed_estimated']):,} đ)\n"
+            f"• **Chờ chi**: **{planned_info['pending_count']} mục** ({int(planned_info['pending_estimated']):,} đ)"
+        )
+    else:
+        plan_comment = "📝 Chưa có kế hoạch chi tiêu dự tính nào được tạo cho kỳ này. Hãy lập danh sách các khoản chi dự kiến để chủ động quản lý ngân sách."
+
+    fallback_analysis = f"""### 📊 BÁO CÁO PHÂN TÍCH TÀI CHÍNH THÔNG MINH - {period_label}
+
+#### 1. 💰 Tổng quan Dòng tiền & Tích lũy
+• **Tổng thu nhập**: {int(report['total_income']):,} đ
+• **Tổng chi tiêu**: {int(report['total_expense']):,} đ
+• **Số dư ròng**: {int(report['balance']):,} đ ({'🟢 Dương - Tình hình tài chính tích cực' if report['balance'] >= 0 else '🔴 Âm - Chi tiêu vượt thu nhập'})
+• **Tỷ lệ tiết kiệm**: **{report['savings_rate']}%**
+
+#### 2. 🎯 Kiểm soát Ngân sách (Budget)
+{budget_comment}
+
+#### 3. 📅 Tiến độ Kế hoạch Chi tiêu (Planned Expenses)
+{plan_comment}
+
+#### 4. 🏷️ Danh mục Chi tiêu Trọng điểm
+• **Top nhóm chi nhiều nhất**: {top_cats_str}
+
+#### 5. 💡 Lộ trình Hành động & Tối ưu Tài chính
+1. **Kiểm soát các khoản chi chờ thực hiện**: Đối chiếu các khoản chi chờ thực hiện ({planned_info['pending_count']} mục) với số dư ví hiện tại để tránh tình trạng thiếu hụt tiền mặt.
+2. **Tuân thủ kỷ luật ngân sách**: Giữ tổng chi tiêu trong giới hạn an toàn dưới 80% hạn mức để luôn có quỹ dự phòng cho các tình huống khẩn cấp.
+3. **Tối ưu hóa các khoản chi lớn**: Rà soát lại các nhóm chi tiêu chiếm tỷ trọng cao nhất ({top_cats[0][0] if top_cats else 'chi tiêu chính'}) để tìm kiếm cơ hội cắt giảm hợp lý.
+
+*(Báo cáo phân tích hỗ trợ quản lý tài chính cá nhân thông minh)*"""
 
     return {
         "report": report,
