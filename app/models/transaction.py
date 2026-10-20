@@ -12,12 +12,16 @@ class Transaction(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
-    wallet_id = Column(Integer, ForeignKey("wallets.id",ondelete="CASCADE"), nullable=False, index=True)
+    wallet_id = Column(Integer, ForeignKey("wallets.id", ondelete="CASCADE"), nullable=False, index=True)
     type = Column(String(20), nullable=False, index=True)  # income | expense
     amount = Column(Numeric(15, 2), nullable=False)
     note = Column(Text, nullable=True)
-    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)   
-   
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+
+    # Khóa idempotency_key chống tạo trùng lặp giao dịch khi client gửi lại (retry)
+    # Ràng buộc UNIQUE đảm bảo một key chỉ được ghi nhận một giao dịch duy nhất
+    idempotency_key = Column(String(100), unique=True, nullable=True, index=True)
+
     wallet = relationship(
         "Wallet", 
         back_populates="transactions"
@@ -30,4 +34,3 @@ class Transaction(Base):
         "Category", 
         back_populates="transactions"
     )
-    

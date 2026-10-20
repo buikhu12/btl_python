@@ -27,14 +27,24 @@ class TransactionRepository:
             Transaction.id == transaction_id, Transaction.user_id == user_id
         ).first()
 
+    # Tìm giao dịch theo idempotency_key để kiểm tra xem đã từng được tạo trước đó chưa
+    def get_by_idempotency_key(self, idempotency_key: str, user_id: int | None = None):
+        query = self.db.query(Transaction).filter(Transaction.idempotency_key == idempotency_key)
+        if user_id is not None:
+            query = query.filter(Transaction.user_id == user_id)
+        return query.first()
+
     def create(self, transaction: Transaction):
         self.db.add(transaction)
+        self.db.flush()
         self.db.refresh(transaction)
         return transaction
 
     def save(self, transaction: Transaction):
+        self.db.commit()
         self.db.refresh(transaction)
         return transaction
 
     def delete(self, transaction: Transaction):
         self.db.delete(transaction)
+        self.db.commit()

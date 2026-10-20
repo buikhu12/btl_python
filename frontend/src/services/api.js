@@ -91,13 +91,41 @@ export const getRecentTransactions = async () => {
 };
 
 // --- TRANSACTIONS APIS ---
+// Hàm sinh idempotency_key duy nhất (UUID) cho mỗi lần người dùng bắt đầu tạo giao dịch
+export const generateIdempotencyKey = () => {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return "idemp-" + Date.now() + "-" + Math.random().toString(36).substring(2, 11);
+};
+
 export const getTransactions = async (params = {}) => {
   const res = await api.get("/transactions/", { params });
   return res.data;
 };
 
-export const createTransaction = async (data) => {
-  const res = await api.post("/transactions/", data);
+// API tạo giao dịch: đính kèm idempotency_key duy nhất trong payload và header
+// Giữ nguyên key đó khi retry để backend nhận diện và không cộng/trừ ví lần nữa
+export const createTransaction = async (data, customKey = null, config = {}) => {
+  const key = customKey || data.idempotency_key || generateIdempotencyKey();
+  const payload = {
+    ...data,
+    idempotency_key: key,
+  };
+  const reqConfig = {
+    ...config,
+    headers: {
+      ...(config.headers || {}),
+      "Idempotency-Key": key,
+    },
+  };
+  const res = await api.post("/transactions/", payload, reqConfig);
+  return res.data;
+};
+
+// API tra cứu trạng thái giao dịch theo idempotency_key (Backend trả về giao dịch và số dư ví hiện tại)
+export const getTransactionByIdempotencyKey = async (key) => {
+  const res = await api.get(`/transactions/idempotency/${key}`);
   return res.data;
 };
 
