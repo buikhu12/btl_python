@@ -34,51 +34,73 @@ class TransactionService:
         return transaction
 
     def create_transaction(self, data: TransactionCreate, user_id: int):
-        self._validate_category(data.category_id, data.type, user_id)
-        from app.repositories.wallet_repository import WalletRepository
-        wallet = WalletRepository(self.repository.db).get_by_user_id(user_id)
-        if not wallet:
-            wallet = WalletRepository(self.repository.db).create_default_wallet(user_id=user_id)
+        try:
+            self._validate_category(data.category_id, data.type, user_id)
+            from app.repositories.wallet_repository import WalletRepository
 
-        change = data.amount 
-        if data.type == "income":
-            wallet.balance += change
-        else :
-            if change > wallet.balance:
+            wallet_repository = WalletRepository(self.repository.db)
+            wallet = wallet_repository.get_by_user_id(user_id)
+            if not wallet:
+                wallet = wallet_repository.create_default_wallet(user_id=user_id)
+
+            # Validate expenses against the current balance before changing it.
+            if data.type == "expense" and data.amount > wallet.balance:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f'Ngân sách không đủ'
+                    detail="Ngân sách không đủ",
                 )
-        tx_data = data.model_dump()
-        
-        tx = Transaction(user_id=user_id, wallet_id=wallet.id, **tx_data)
-        if tx.type == 'expense' and tx.amount > wallet.balance:
-             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
-                                 detail="Mức chi tiêu vượt quá ngân sách")
-             
-        created = self.repository.create(tx)
-        
-        change = data.amount if data.type == "income" else -data.amount
-       
 
-        wallet.balance += change
-        
-        self.repository.db.commit()
-        return created
+            tx = Transaction(user_id=user_id, wallet_id=wallet.id, **data.model_dump())
+            created = self.repository.create(tx)
+
+            # Apply the balance change once: income adds; expense subtracts.
+            change = data.amount if data.type == "income" else -data.amount
+            wallet.balance += change
+
+            # Commit transaction row and wallet balance together.
+            self.repository.db.commit()
+            self.repository.db.refresh(created)
+            return created
+        except Exception:
+            # Roll back pending database changes if validation or persistence fails.
+            self.repository.db.rollback()
+            raise
 
     def update_transaction(self, transaction_id: int, data: TransactionUpdate, user_id: int):
-        transaction = self.get_transaction(transaction_id, user_id)
-        updates = data.model_dump(exclude_unset=True)
-        self._validate_category(updates.get("category_id", transaction.category_id), updates.get("type", transaction.type), user_id)
-        for field, value in updates.items():
-            setattr(transaction, field, value)
-        return self.repository.save(transaction)
+        try:
+            transaction = self.get_transaction(transaction_id, user_id)
+            updates = data.model_dump(exclude_unset=True)
+            self._validate_category(
+                updates.get("category_id", transaction.category_id),
+                updates.get("type", transaction.type),
+                user_id,
+            )
+            for field, value in updates.items():
+                setattr(transaction, field, value)
+
+            # Commit the update here so it can be rolled back on failure.
+            self.repository.db.commit()
+            self.repository.db.refresh(transaction)
+            return transaction
+        except Exception:
+            # Roll back pending updates if validation or persistence fails.
+            self.repository.db.rollback()
+            raise
 
     def delete_transaction(self, transaction_id: int, user_id: int):
-        tx = self.get_transaction(transaction_id, user_id)
-        from app.repositories.wallet_repository import WalletRepository
-        wallet = WalletRepository(self.repository.db).get_by_user_id(user_id)
-        if wallet:
-            change = tx.amount if tx.type == "expense" else -tx.amount
-            wallet.balance += change
-        self.repository.delete(tx)
+        try:
+            tx = self.get_transaction(transaction_id, user_id)
+            from app.repositories.wallet_repository import WalletRepository
+
+            wallet = WalletRepository(self.repository.db).get_by_user_id(user_id)
+            if wallet:
+                change = tx.amount if tx.type == "expense" else -tx.amount
+                wallet.balance += change
+
+            self.repository.delete(tx)
+            # Commit deletion and wallet balance change together.
+            self.repository.db.commit()
+        except Exception:
+            # Restore the session if deleting or committing fails.
+            self.repository.db.rollback()
+            raise

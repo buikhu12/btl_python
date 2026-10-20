@@ -29,15 +29,12 @@ class TransactionRepository:
 
     def create(self, transaction: Transaction):
         self.db.add(transaction)
-        self.db.commit()
         self.db.refresh(transaction)
         return transaction
 
     def save(self, transaction: Transaction):
-        self.db.commit()
         self.db.refresh(transaction)
         return transaction
 
     def delete(self, transaction: Transaction):
         self.db.delete(transaction)
-        self.db.commit()
